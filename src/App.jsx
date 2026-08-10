@@ -3,7 +3,7 @@ import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid
 } from 'recharts';
 import { 
-  Scale, Utensils, Settings, ChevronLeft, ChevronRight, 
+  Scale, Utensils, Settings, ChevronLeft, ChevronRight, ChevronUp,
   HelpCircle, AlertTriangle, X, Plus, ExternalLink, Download, Upload, FileText, Camera, Trash2
 } from 'lucide-react';
 
@@ -215,16 +215,14 @@ const calculateBMR = (gender, weight, height, age) => {
 };
 
 const getActiveDynamicParam = (dateStr, dynamicParamsList) => {
-  const safeList = Array.isArray(dynamicParamsList) ? dynamicParamsList : [];
-  if (safeList.length === 0) return { height: 170, deficit: 300, activity: 1.2 };
-  const sorted = [...safeList].sort((a, b) => new Date(b.effectiveDate) - new Date(a.effectiveDate));
+  if (!dynamicParamsList || dynamicParamsList.length === 0) return { height: 170, deficit: 300, activity: 1.2 };
+  const sorted = [...dynamicParamsList].sort((a, b) => new Date(b.effectiveDate) - new Date(a.effectiveDate));
   const found = sorted.find(p => p.effectiveDate <= dateStr);
   return found || sorted[sorted.length - 1];
 };
 
 const getEffectiveWeight = (targetDateStr, weightsList) => {
-  const safeList = Array.isArray(weightsList) ? weightsList : [];
-  if (safeList.length === 0) return 70;
+  if (!weightsList || weightsList.length === 0) return 70;
   
   const targetDate = new Date(targetDateStr);
   const day = targetDate.getDay();
@@ -237,7 +235,7 @@ const getEffectiveWeight = (targetDateStr, weightsList) => {
   const prevSunday = new Date(currentMonday);
   prevSunday.setDate(prevSunday.getDate() - 1);
 
-  const prevWeekWeights = safeList.filter(w => {
+  const prevWeekWeights = weightsList.filter(w => {
     const dt = new Date(w.date);
     return dt >= prevMonday && dt <= prevSunday;
   });
@@ -247,7 +245,7 @@ const getEffectiveWeight = (targetDateStr, weightsList) => {
     return sum / prevWeekWeights.length;
   }
 
-  const sorted = [...safeList].sort((a, b) => new Date(a.date) - new Date(b.date));
+  const sorted = [...weightsList].sort((a, b) => new Date(a.date) - new Date(b.date));
   return sorted[0].weight;
 };
 
@@ -281,18 +279,15 @@ export default function App() {
   });
   const [dynamicParams, setDynamicParams] = useState(() => {
     const saved = localStorage.getItem('willfit_dynamicParams');
-    const parsed = saved ? JSON.parse(saved) : [];
-    return Array.isArray(parsed) ? parsed : [];
+    return saved ? JSON.parse(saved) : [];
   });
   const [weights, setWeights] = useState(() => {
     const saved = localStorage.getItem('willfit_weights');
-    const parsed = saved ? JSON.parse(saved) : [];
-    return Array.isArray(parsed) ? parsed : [];
+    return saved ? JSON.parse(saved) : [];
   });
   const [meals, setMeals] = useState(() => {
     const saved = localStorage.getItem('willfit_meals');
-    const parsed = saved ? JSON.parse(saved) : [];
-    return Array.isArray(parsed) ? parsed : [];
+    return saved ? JSON.parse(saved) : [];
   });
   const [lang, setLang] = useState(() => {
     return localStorage.getItem('willfit_lang') || 'zh';
@@ -331,16 +326,12 @@ export default function App() {
     let isDangerActive = true;
 
     const today = new Date();
-    const safeMeals = Array.isArray(meals) ? meals : [];
-    const safeDynamicParams = Array.isArray(dynamicParams) ? dynamicParams : [];
-    const safeWeights = Array.isArray(weights) ? weights : [];
-
     for (let i = 0; i < 60; i++) {
       const d = new Date(today);
       d.setDate(today.getDate() - i);
       const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
       
-      const dayMeals = safeMeals.filter(m => m.date === dateStr);
+      const dayMeals = meals.filter(m => m.date === dateStr);
       if (dayMeals.length === 0) {
         if (i === 0) {
           // If today has no records, skip it without breaking streaks
@@ -354,8 +345,8 @@ export default function App() {
       }
 
       const totalCal = dayMeals.reduce((acc, curr) => acc + curr.calories, 0);
-      const dyn = getActiveDynamicParam(dateStr, safeDynamicParams);
-      const wAvg = getEffectiveWeight(dateStr, safeWeights);
+      const dyn = getActiveDynamicParam(dateStr, dynamicParams);
+      const wAvg = getEffectiveWeight(dateStr, weights);
       const age = new Date().getFullYear() - (profile?.birthYear || 1990);
       const bmr = calculateBMR(profile?.gender || 'male', wAvg, dyn.height, age);
       const targetCal = Math.round(bmr * dyn.activity - dyn.deficit);
@@ -396,10 +387,7 @@ export default function App() {
   }, [streakData.isBleeding]);
 
   const todayStr = getTodayDateStr();
-  const safeMeals = Array.isArray(meals) ? meals : [];
-  const safeWeights = Array.isArray(weights) ? weights : [];
-  
-  const todayMeals = safeMeals.filter(m => m.date === todayStr);
+  const todayMeals = meals.filter(m => m.date === todayStr);
   const todayTotalCal = todayMeals.reduce((acc, curr) => acc + curr.calories, 0);
   const todayDyn = getActiveDynamicParam(todayStr, dynamicParams);
   const todayWAvg = getEffectiveWeight(todayStr, weights);
@@ -408,7 +396,7 @@ export default function App() {
   const todayTargetCal = Math.round(todayBmr * (todayDyn?.activity || 1.2) - (todayDyn?.deficit || 300));
   const todayRemainingCal = todayTargetCal - todayTotalCal;
 
-  if (!profile || (Array.isArray(dynamicParams) ? dynamicParams : []).length === 0) {
+  if (!profile || dynamicParams.length === 0) {
     return <Onboarding profile={profile} setProfile={setProfile} setDynamicParams={setDynamicParams} lang={lang} setLang={setLang} theme={theme} setTheme={setTheme} strings={strings} />;
   }
 
@@ -429,7 +417,7 @@ export default function App() {
                 {strings.appName}
               </h1>
               <div className="flex items-center space-x-3 text-xs font-medium opacity-90 mt-1">
-                <span>{safeWeights.find(w => w.date === todayStr)?.weight || '--'} kg</span>
+                <span>{weights.find(w => w.date === todayStr)?.weight || '--'} kg</span>
                 <span>|</span>
                 <span>{strings.remainingCal}: <strong className={`${todayRemainingCal < 0 ? 'text-red-400 font-bold' : ''}`}>{todayRemainingCal}</strong></span>
                 <span>|</span>
@@ -448,7 +436,6 @@ export default function App() {
                   <div className={`absolute right-0 mt-2 w-52 rounded-2xl shadow-xl border z-50 overflow-hidden ${theme === 'dark' ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'}`}>
                     <div className="p-2 border-b text-[10px] font-bold opacity-60 px-4 uppercase tracking-wider">{strings.settingsTitle}</div>
                     <button onClick={() => { setIsSettingsOpen(false); setCurrentTab('dashboard'); setDashboardScrollTarget('profile'); }} className="w-full text-left px-4 py-3 text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-700 border-b border-slate-100 dark:border-slate-700 transition-colors">{strings.editProfile}</button>
-                    <button onClick={() => { setIsSettingsOpen(false); setCurrentTab('dashboard'); setDashboardScrollTarget('dynamic'); }} className="w-full text-left px-4 py-3 text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-700 border-b border-slate-100 dark:border-slate-700 transition-colors">{strings.editDynamic}</button>
                     <button onClick={() => { setIsSettingsOpen(false); setCurrentTab('dashboard'); setDashboardScrollTarget('backup'); }} className="w-full text-left px-4 py-3 text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-700 border-b border-slate-100 dark:border-slate-700 transition-colors">{strings.backupImport}</button>
                     <button onClick={() => { setIsSettingsOpen(false); setCurrentTab('dashboard'); setDashboardScrollTarget('recent'); }} className="w-full text-left px-4 py-3 text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">{strings.recentRecords}</button>
                     <div className="h-2 bg-slate-100 dark:bg-slate-900 border-y border-slate-200 dark:border-slate-700"></div>
@@ -493,9 +480,9 @@ export default function App() {
 // ==========================================
 function Onboarding({ profile, setProfile, setDynamicParams, lang, setLang, theme, setTheme, strings }) {
   const [step, setStep] = useState(1);
-  const [name, setName] = useState(profile?.name || '韶輝');
+  const [name, setName] = useState(profile?.name || 'Will');
   const [gender, setGender] = useState(profile?.gender || 'male');
-  const [birthYear, setBirthYear] = useState(profile?.birthYear || 1990);
+  const [birthYear, setBirthYear] = useState(profile?.birthYear || 2000);
   const [height, setHeight] = useState(170);
   const [deficit, setDeficit] = useState(300);
   const [activity, setActivity] = useState(1.2);
@@ -588,7 +575,7 @@ function Onboarding({ profile, setProfile, setDynamicParams, lang, setLang, them
         )}
       </div>
       
-      {activeInfo && <DynamicInfoModal type={activeInfo} onClose={() => setActiveInfo(null)} theme={theme} strings={strings} />}
+      {activeInfo && <DynamicInfoModal type={activeInfo} onClose={() => setActiveInfo(null)} theme={theme} strings={strings} lang={lang} />}
     </div>
   );
 }
@@ -600,12 +587,11 @@ function WeightTab({ lang, theme, profile, dynamicParams, weights, setWeights, a
   const [weightInput, setWeightInput] = useState('');
   const [showFormula, setShowFormula] = useState(false);
   const [chartMode, setChartMode] = useState('daily'); 
+  const [isFormOpen, setIsFormOpen] = useState(false);
   const resultRef = useRef(null);
 
-  const safeWeights = Array.isArray(weights) ? weights : [];
-
   useEffect(() => {
-    const existing = safeWeights.find(w => w.date === activeDate);
+    const existing = weights.find(w => w.date === activeDate);
     setWeightInput(existing ? existing.weight : '');
   }, [activeDate, weights]);
 
@@ -613,8 +599,7 @@ function WeightTab({ lang, theme, profile, dynamicParams, weights, setWeights, a
     e.preventDefault();
     if (!weightInput) return;
     setWeights(prev => {
-      const safePrev = Array.isArray(prev) ? prev : [];
-      const filtered = safePrev.filter(w => w.date !== activeDate);
+      const filtered = prev.filter(w => w.date !== activeDate);
       return [...filtered, { date: activeDate, weight: Number(weightInput) }].sort((a, b) => new Date(a.date) - new Date(b.date));
     });
     setTimeout(() => { resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 100);
@@ -628,11 +613,11 @@ function WeightTab({ lang, theme, profile, dynamicParams, weights, setWeights, a
   const targetCal = tdee - dyn.deficit;
 
   const chartData = useMemo(() => {
-    if (chartMode === 'daily') return safeWeights.map(w => ({ date: w.date.substring(5), weight: w.weight }));
+    if (chartMode === 'daily') return weights.map(w => ({ date: w.date.substring(5), weight: w.weight }));
     
     // Weekly avg
     const weeksMap = {};
-    safeWeights.forEach(w => {
+    weights.forEach(w => {
       const d = new Date(w.date);
       const day = d.getDay();
       const diff = d.getDate() - day + (day === 0 ? -6 : 1);
@@ -659,29 +644,37 @@ function WeightTab({ lang, theme, profile, dynamicParams, weights, setWeights, a
   return (
     <div className="space-y-6">
       <div className={`p-6 rounded-3xl shadow border ${theme === 'dark' ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-        <h2 className="text-lg font-bold mb-4 flex items-center gap-2">{strings.weightTab}</h2>
-        <form onSubmit={handleWeightSubmit} className="space-y-4">
+        <div className="flex justify-between items-center cursor-pointer" onClick={() => setIsFormOpen(!isFormOpen)}>
+          <h2 className="text-lg font-bold flex items-center gap-2">{strings.weightTab}</h2>
+          <button type="button" className="p-2 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-full transition-colors">
+             {isFormOpen ? <ChevronUp size={18}/> : <Plus size={18}/>}
+          </button>
+        </div>
+        
+        {isFormOpen && (
+        <form onSubmit={handleWeightSubmit} className="space-y-4 mt-4 animate-in fade-in slide-in-from-top-2">
           <div>
             <label className="block text-sm font-medium mb-1 text-slate-500">{strings.date}</label>
             <div className="flex gap-2">
-              <button type="button" onClick={() => changeDate(-1)} className={`px-4 rounded-xl border hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors ${theme === 'dark' ? 'bg-slate-900 border-slate-700' : 'bg-slate-100 border-slate-200'}`}><ChevronLeft size={20}/></button>
-              <div className={`flex-1 flex justify-center items-center rounded-xl border py-2 ${theme === 'dark' ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200 focus-within:border-blue-500'}`}>
-                <input type="date" value={activeDate} onChange={e => setActiveDate(e.target.value)} className="bg-transparent text-center font-bold outline-none dark:[color-scheme:dark] w-[140px] text-slate-900 dark:text-white" />
-                <span className="text-[10px] text-gray-500 font-bold ml-2">{getDayOfWeek(activeDate, lang)}</span>
+              <button type="button" onClick={() => changeDate(-1)} className={`px-4 rounded-xl border hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors ${theme === 'dark' ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-100 border-slate-200 text-slate-900'}`}><ChevronLeft size={20}/></button>
+              <div className={`flex-1 flex justify-center items-center rounded-xl border py-2 gap-2 ${theme === 'dark' ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200 focus-within:border-blue-500'}`}>
+                <span className="text-xs text-slate-500 font-bold whitespace-nowrap">{getDayOfWeek(activeDate, lang)}</span>
+                <input type="date" lang={lang === 'en' ? 'en-US' : 'zh-TW'} value={activeDate} onChange={e => setActiveDate(e.target.value)} className="bg-transparent text-center font-bold outline-none dark:[color-scheme:dark] text-slate-900 dark:text-white" />
               </div>
-              <button type="button" onClick={() => changeDate(1)} className={`px-4 rounded-xl border hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors ${theme === 'dark' ? 'bg-slate-900 border-slate-700' : 'bg-slate-100 border-slate-200'}`}><ChevronRight size={20}/></button>
+              <button type="button" onClick={() => changeDate(1)} className={`px-4 rounded-xl border hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors ${theme === 'dark' ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-100 border-slate-200 text-slate-900'}`}><ChevronRight size={20}/></button>
             </div>
           </div>
           <div>
             <label className="block text-sm font-medium mb-1 text-slate-500">{strings.weight}</label>
             <div className="flex gap-2">
               <button type="button" onClick={() => setWeightInput(prev => Math.max(0, Number(prev||70)-0.1).toFixed(1))} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold text-lg hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors">-</button>
-              <input type="number" step="0.1" value={weightInput} onChange={e => setWeightInput(e.target.value)} required className={`${inputClass} w-full text-2xl font-bold text-center`} placeholder="0.0" />
-              <button type="button" onClick={() => setWeightInput(prev => (Number(prev||70)+0.1).toFixed(1))} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold text-lg hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors">+</button>
+              <input type="number" step="0.1" value={weightInput} onChange={e => setWeightInput(e.target.value)} required className={`${inputClass} text-center font-bold text-xl flex-1`} placeholder="70.0" />
+              <button type="button" onClick={() => setWeightInput(prev => (Number(prev||70)+0.1).toFixed(1))} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold text-lg hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors text-slate-900 dark:text-white">+</button>
             </div>
           </div>
           <button type="submit" className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg transition-colors">{strings.submit}</button>
         </form>
+        )}
       </div>
 
       <div ref={resultRef} className={`p-6 rounded-3xl shadow border relative overflow-hidden ${theme === 'dark' ? 'bg-slate-800 border-slate-700' : 'bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-100'}`}>
@@ -735,10 +728,10 @@ function WeightTab({ lang, theme, profile, dynamicParams, weights, setWeights, a
             <div className="text-sm space-y-2 opacity-90">
               <p>{lang === 'zh' ? '當日熱量目標是根據「上一週的平均體重」來計算，避免每天體重波動影響目標。若是第一週則使用最早紀錄的體重。' : 'Target is based on previous week avg weight.'}</p>
               <div className={`p-4 mt-4 rounded-xl font-mono text-xs leading-relaxed ${theme === 'dark' ? 'bg-slate-900' : 'bg-slate-100'}`}>
-                <div className="text-slate-500 mb-2">使用體重: {wAvg.toFixed(1)} kg | 身高: {dyn.height} cm</div>
+                <div className="text-slate-500 mb-2">{lang === 'zh' ? '使用體重' : 'Weight'}: {wAvg.toFixed(1)} kg | {lang === 'zh' ? '身高' : 'Height'}: {dyn.height} cm</div>
                 <div>BMR = {Math.ceil(bmr)} kcal</div>
                 <div className="text-blue-500 mt-1">TDEE = {Math.ceil(bmr)} × {dyn.activity} = {Math.ceil(tdee)} kcal</div>
-                <div className="text-green-600 mt-1 font-bold">目標 = {Math.ceil(tdee)} - {dyn.deficit} = {Math.ceil(targetCal)} kcal</div>
+                <div className="text-green-600 mt-1 font-bold">{lang === 'zh' ? '目標' : 'Target'} = {Math.ceil(tdee)} - {dyn.deficit} = {Math.ceil(targetCal)} kcal</div>
               </div>
             </div>
             <button onClick={() => setShowFormula(false)} className="w-full mt-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition-colors">{strings.cancel}</button>
@@ -760,9 +753,9 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
   const [selectedPhoto, setSelectedPhoto] = useState(null);
   const [editingMealId, setEditingMealId] = useState(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
+  const [isFormOpen, setIsFormOpen] = useState(false);
 
-  const safeMeals = Array.isArray(meals) ? meals : [];
-  const dayMeals = safeMeals.filter(m => m.date === activeDate);
+  const dayMeals = meals.filter(m => m.date === activeDate);
   const totalCal = dayMeals.reduce((acc, curr) => acc + curr.calories, 0);
   const dyn = getActiveDynamicParam(activeDate, dynamicParams);
   const wAvg = getEffectiveWeight(activeDate, weights);
@@ -791,7 +784,7 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
       });
     }));
 
-    setPhotos(prev => [...(Array.isArray(prev) ? prev : []), ...newPhotos]);
+    setPhotos(prev => [...prev, ...newPhotos]);
     e.target.value = '';
   };
 
@@ -799,17 +792,19 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
     e.preventDefault();
     if (!mealName || !mealCal) return;
     if (editingMealId) {
-      setMeals(prev => (Array.isArray(prev) ? prev : []).map(m => m.id === editingMealId ? { ...m, time: mealTime, name: mealName, calories: Number(mealCal), photos } : m));
+      setMeals(prev => prev.map(m => m.id === editingMealId ? { ...m, time: mealTime, name: mealName, calories: Number(mealCal), photos } : m));
       setEditingMealId(null);
     } else {
-      setMeals(prev => [...(Array.isArray(prev) ? prev : []), { id: Date.now().toString(), date: activeDate, time: mealTime, name: mealName, calories: Number(mealCal), photos }]);
+      setMeals(prev => [...prev, { id: Date.now().toString(), date: activeDate, time: mealTime, name: mealName, calories: Number(mealCal), photos }]);
     }
     setMealName(''); setMealCal(''); setPhotos([]);
+    setIsFormOpen(false);
   };
 
   const startEdit = (m) => {
     setEditingMealId(m.id);
     setMealTime(m.time); setMealName(m.name); setMealCal(m.calories); setPhotos(m.photos || (m.photoUrl ? [m.photoUrl] : []));
+    setIsFormOpen(true);
   };
 
   const getStatusIcon = () => {
@@ -824,11 +819,11 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
   return (
     <div className="space-y-6">
       
-      <div className={`p-2 rounded-2xl shadow border flex items-center justify-between ${theme === 'dark' ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+      <div className={`p-2 rounded-2xl shadow border flex items-center justify-between ${theme === 'dark' ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
         <button onClick={() => changeDate(-1)} className={`p-2 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors ${theme === 'dark' ? 'bg-slate-900' : 'bg-slate-100'}`}><ChevronLeft size={20}/></button>
-        <div className="flex justify-center items-center">
-          <input type="date" value={activeDate} onChange={e => setActiveDate(e.target.value)} className="bg-transparent font-bold text-center outline-none dark:[color-scheme:dark] text-slate-900 w-[140px] dark:text-white" />
-          <span className="text-[10px] opacity-60 font-bold ml-2">{getDayOfWeek(activeDate, lang)}</span>
+        <div className="flex justify-center items-center gap-2">
+          <span className="text-xs opacity-60 font-bold whitespace-nowrap">{getDayOfWeek(activeDate, lang)}</span>
+          <input type="date" lang={lang === 'en' ? 'en-US' : 'zh-TW'} value={activeDate} onChange={e => setActiveDate(e.target.value)} className="bg-transparent font-bold text-center outline-none dark:[color-scheme:dark] text-slate-900 dark:text-white" />
         </div>
         <button onClick={() => changeDate(1)} className={`p-2 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors ${theme === 'dark' ? 'bg-slate-900' : 'bg-slate-100'}`}><ChevronRight size={20}/></button>
       </div>
@@ -842,30 +837,37 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
           {remainingCal} 
         </div>
         <div className="mt-4 flex justify-center items-center gap-6 text-sm relative font-medium">
-          <div className="flex flex-col"><span className="text-slate-400 text-xs">目標</span><strong>{targetCal}</strong></div>
+          <div className="flex flex-col"><span className="text-slate-400 text-xs">{lang === 'zh' ? '目標' : 'Target'}</span><strong className={theme === 'dark' ? 'text-white' : 'text-slate-900'}>{targetCal}</strong></div>
           <div className="w-px h-8 bg-slate-200 dark:bg-slate-700"></div>
           <div>{getStatusIcon()}</div>
           <div className="w-px h-8 bg-slate-200 dark:bg-slate-700"></div>
-          <div className="flex flex-col"><span className="text-slate-400 text-xs">已攝取</span><strong className="text-blue-500">{totalCal}</strong></div>
+          <div className="flex flex-col"><span className="text-slate-400 text-xs">{lang === 'zh' ? '已攝取' : 'Intake'}</span><strong className="text-blue-500">{totalCal}</strong></div>
         </div>
       </div>
 
       <div className={`p-6 rounded-3xl shadow border ${theme === 'dark' ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="font-bold">{editingMealId ? strings.editMeal : strings.addMeal}</h3>
-          {editingMealId && <button onClick={() => { setEditingMealId(null); setMealName(''); setMealCal(''); setPhotos([]); }} className="text-xs font-bold bg-slate-200 dark:bg-slate-700 px-3 py-1.5 rounded-lg">{strings.cancel}</button>}
+        <div className="flex justify-between items-center cursor-pointer" onClick={() => setIsFormOpen(!isFormOpen)}>
+          <h3 className="font-bold flex items-center gap-2">{editingMealId ? strings.editMeal : strings.addMeal}</h3>
+          <div className="flex items-center gap-2">
+            {editingMealId && <button type="button" onClick={(e) => { e.stopPropagation(); setEditingMealId(null); setMealName(''); setMealCal(''); setPhotos([]); setIsFormOpen(false); }} className="text-xs font-bold bg-slate-200 dark:bg-slate-700 px-3 py-1.5 rounded-lg text-slate-900 dark:text-white">{strings.cancel}</button>}
+            <button type="button" className="p-2 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-full transition-colors">
+               {isFormOpen || editingMealId ? <ChevronUp size={18}/> : <Plus size={18}/>}
+            </button>
+          </div>
         </div>
-        <form onSubmit={handleMealSubmit} className="space-y-4">
+        
+        {(isFormOpen || editingMealId) && (
+        <form onSubmit={handleMealSubmit} className="space-y-4 mt-4 animate-in fade-in slide-in-from-top-2">
           <div className="flex gap-3">
             <div className="w-1/3">
               <label className="block text-xs font-bold mb-1 text-slate-500">{strings.mealTime}</label>
-              <input type="time" value={mealTime} onChange={e => setMealTime(e.target.value)} required className={inputClass} />
+              <input type="time" lang={lang === 'en' ? 'en-US' : 'zh-TW'} value={mealTime} onChange={e => setMealTime(e.target.value)} required className={inputClass} />
             </div>
             <div className="w-2/3">
               <label className="block text-xs font-bold mb-1 text-slate-500">{strings.mealCal}</label>
               <div className="flex gap-2">
                 <button type="button" onClick={() => setMealCal(Math.max(0,Number(mealCal||0)-50))} className="px-3 bg-slate-200 dark:bg-slate-700 rounded-xl text-lg font-bold hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors">-</button>
-                <input type="number" step="10" value={mealCal} onChange={e => setMealCal(e.target.value)} required className={`${inputClass} text-center font-bold`} placeholder="450" />
+                <input type="number" step="10" value={mealCal} onChange={e => setMealCal(e.target.value)} required className={`${inputClass} text-center font-bold flex-1`} placeholder="450" />
                 <button type="button" onClick={() => setMealCal(Number(mealCal||0)+50)} className="px-3 bg-slate-200 dark:bg-slate-700 rounded-xl text-lg font-bold hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors">+</button>
               </div>
             </div>
@@ -877,10 +879,10 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
           <div>
             <label className="block text-xs font-bold mb-2 text-slate-500">{strings.photos}</label>
             <div className="flex flex-wrap gap-3">
-              {(Array.isArray(photos) ? photos : []).map((url, idx) => (
+              {photos.map((url, idx) => (
                 <div key={idx} className="relative w-20 h-20 group">
                   <img src={url} alt={`preview-${idx}`} className="w-full h-full object-cover rounded-xl border border-slate-200 dark:border-slate-600" />
-                  <button type="button" onClick={() => setPhotos(prev => (Array.isArray(prev) ? prev : []).filter((_, i) => i !== idx))} 
+                  <button type="button" onClick={() => setPhotos(prev => prev.filter((_, i) => i !== idx))} 
                     className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-md hover:scale-110 transition-transform">
                     <X size={12} />
                   </button>
@@ -892,9 +894,10 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
                 <input type="file" accept="image/*" multiple className="hidden" onChange={handlePhotoUpload} />
               </label>
             </div>
+            <button type="submit" className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg transition-colors mt-2">{editingMealId ? strings.update : strings.addMeal}</button>
           </div>
-          <button type="submit" className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg transition-colors mt-2">{editingMealId ? strings.update : strings.addMeal}</button>
         </form>
+        )}
       </div>
 
       <div className="space-y-3">
@@ -918,7 +921,7 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
               </div>
               {m.photos && m.photos.length > 0 && (
                 <div className="flex gap-2 overflow-x-auto ml-16 pb-1">
-                  {(Array.isArray(m.photos) ? m.photos : []).map((p, i) => (
+                  {m.photos.map((p, i) => (
                     <img key={i} src={p} alt="meal" onClick={(e) => { e.stopPropagation(); setSelectedPhoto(p); }} 
                       className="w-16 h-16 object-cover rounded-xl border border-slate-200 dark:border-slate-700 shrink-0 cursor-pointer" />
                   ))}
@@ -935,7 +938,7 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
             <h4 className="font-bold mb-4">{lang === 'zh' ? '確認刪除此餐點？' : 'Delete this meal?'}</h4>
             <div className="flex gap-4">
               <button onClick={() => setDeleteConfirmId(null)} className="w-1/2 py-3 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold">{strings.cancel}</button>
-              <button onClick={() => { setMeals(prev => (Array.isArray(prev) ? prev : []).filter(m => m.id !== deleteConfirmId)); setDeleteConfirmId(null); }} className="w-1/2 py-3 bg-red-600 text-white font-bold rounded-xl shadow-lg">{strings.confirmDelete}</button>
+              <button onClick={() => { setMeals(prev => prev.filter(m => m.id !== deleteConfirmId)); setDeleteConfirmId(null); }} className="w-1/2 py-3 bg-red-600 text-white font-bold rounded-xl shadow-lg">{strings.confirmDelete}</button>
             </div>
           </div>
         </div>
@@ -960,9 +963,6 @@ function DashboardTab({ lang, setLang, theme, setTheme, profile, setProfile, dyn
   const recentRecordsRef = useRef(null);
   const [showEditProfileModal, setShowEditProfileModal] = useState(false);
   const [editProfileForm, setEditProfileForm] = useState({ name: profile.name, gender: profile.gender, birthYear: profile.birthYear });
-
-  const safeMeals = Array.isArray(meals) ? meals : [];
-  const safeWeights = Array.isArray(weights) ? weights : [];
 
   useEffect(() => {
     if (scrollTarget) {
@@ -991,10 +991,10 @@ function DashboardTab({ lang, setLang, theme, setTheme, profile, setProfile, dyn
       d.setDate(today.getDate() - i);
       const dateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
       
-      const dayMeals = safeMeals.filter(m => m.date === dateStr);
+      const dayMeals = meals.filter(m => m.date === dateStr);
       const total = dayMeals.reduce((acc, curr) => acc + curr.calories, 0);
       const dyn = getActiveDynamicParam(dateStr, dynamicParams);
-      const bmr = calculateBMR(profile?.gender || 'male', getEffectiveWeight(dateStr, safeWeights), dyn.height, new Date().getFullYear() - (profile?.birthYear || 1990));
+      const bmr = calculateBMR(profile?.gender || 'male', getEffectiveWeight(dateStr, weights), dyn.height, new Date().getFullYear() - (profile?.birthYear || 1990));
       const target = Math.round(bmr * dyn.activity - dyn.deficit);
 
       let status = 'none';
@@ -1009,7 +1009,7 @@ function DashboardTab({ lang, setLang, theme, setTheme, profile, setProfile, dyn
   }, [meals, dynamicParams, weights, profile]);
 
   const avgCal30 = useMemo(() => {
-    const last30 = safeMeals.filter(m => {
+    const last30 = meals.filter(m => {
        const dt = new Date(m.date);
        const daysAgo = (new Date().getTime() - dt.getTime()) / (1000 * 3600 * 24);
        return daysAgo <= 30;
@@ -1033,65 +1033,65 @@ function DashboardTab({ lang, setLang, theme, setTheme, profile, setProfile, dyn
         </div>
       </div>
 
+      {/* 數據統計區塊 (Data Stats) */}
       <div className="grid grid-cols-3 gap-3">
-        <div className={`text-center p-4 rounded-2xl shadow border ${theme === 'dark' ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+        <div className={`p-3 rounded-2xl shadow-sm text-center border ${theme === 'dark' ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
           <div className="text-xs text-slate-500 mb-1">{strings.streak}</div>
           <div className="text-2xl font-black text-orange-500">{streakData.currentStreak} <span className="text-sm font-normal text-slate-400">{strings.streakDays}</span></div>
         </div>
-        <div className={`text-center p-4 rounded-2xl shadow border ${theme === 'dark' ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+        <div className={`p-3 rounded-2xl shadow-sm text-center border ${theme === 'dark' ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
           <div className="text-xs text-slate-500 mb-1">{strings.maxStreak}</div>
-          <div className="text-2xl font-black text-slate-700 dark:text-slate-200">{streakData.maxStreak} <span className="text-sm font-normal text-slate-400">{strings.streakDays}</span></div>
+          <div className="text-2xl font-black">{streakData.maxStreak} <span className="text-sm font-normal text-slate-400">{strings.streakDays}</span></div>
         </div>
-        <div className={`text-center p-4 rounded-2xl shadow border ${theme === 'dark' ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+        <div className={`p-3 rounded-2xl shadow-sm text-center border ${theme === 'dark' ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
           <div className="text-xs text-slate-500 mb-1">{strings.avgCal}</div>
-          <div className="text-xl font-bold text-blue-500 mt-1">{avgCal30}</div>
+          <div className="text-xl font-bold mt-1 text-blue-500">{avgCal30}</div>
         </div>
       </div>
 
+      {/* 飲食達成率熱力圖 (Heatmap) */}
       <div className={`p-6 rounded-3xl shadow border ${theme === 'dark' ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
         <h3 className="font-bold mb-4">{strings.heatmapTitle}</h3>
-        <div className="grid grid-cols-6 sm:grid-cols-10 gap-2">
-          {heatmapDays.map((item, idx) => {
-            let bgClass = 'bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-600';
+        <div className="grid grid-cols-7 gap-2">
+          {heatmapDays.map((day) => {
+            let bg = theme === 'dark' ? 'bg-slate-700' : 'bg-slate-100';
             let icon = '';
-            if (item.status === 'success') { bgClass = 'bg-green-100 dark:bg-green-900/30 text-green-600 border-green-200 dark:border-green-800'; icon = '✅'; }
-            if (item.status === 'over') { bgClass = 'bg-purple-100 dark:bg-purple-900/30 text-purple-600 border-purple-200 dark:border-purple-800'; icon = '❌'; }
-            if (item.status === 'danger') { bgClass = 'bg-red-200 dark:bg-red-900/50 text-red-600 border-red-500'; icon = '☠️'; }
-            
+            if (day.status === 'success') { bg = 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)] border-none text-white'; icon = '✅'; }
+            if (day.status === 'over') { bg = 'bg-purple-500 shadow-[0_0_8px_rgba(168,85,247,0.4)] border-none text-white'; icon = '❌'; }
+            if (day.status === 'danger') { bg = 'bg-red-900 border-2 border-red-500 animate-pulse text-white'; icon = '☠️'; }
+
             return (
-              <div key={idx} onDoubleClick={() => { setActiveDate(item.date); setCurrentTab('diet'); }}
-                className={`relative group aspect-square rounded-lg ${bgClass} flex items-center justify-center cursor-pointer transition-transform hover:scale-110`}>
-                <span className="text-xs font-bold drop-shadow-sm">{icon}</span>
-                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:flex flex-col items-center bg-gray-900 text-white text-[10px] sm:text-xs px-3 py-2 rounded-lg z-50 w-max shadow-xl">
-                  <span className="font-bold mb-1">{item.date}</span>
-                  <span>{lang === 'zh' ? `攝入: ${item.cal} kcal` : `Intake: ${item.cal} kcal`}</span>
-                  <span className="text-gray-400 mt-1 text-[9px]">{lang === 'zh' ? '雙擊可修改查看' : 'Double click to edit'}</span>
-                  <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
+              <div 
+                key={day.date} 
+                onDoubleClick={() => { setActiveDate(day.date); setCurrentTab('diet'); }}
+                className={`relative group aspect-square rounded-md ${bg} flex items-center justify-center cursor-pointer hover:scale-110 transition-transform`}
+              >
+                <span className="text-[10px]">{icon}</span>
+                <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-max bg-slate-800 text-white text-xs px-2 py-1 rounded shadow-lg pointer-events-none">
+                  <div className="font-bold text-center">{day.date}</div>
+                  <div className="text-center">{lang === 'zh' ? '攝取' : 'Intake'} {day.cal} kcal</div>
+                  <div className="text-slate-300 text-[10px] mt-1">{lang === 'zh' ? '雙擊修改查看' : 'Double click to edit'}</div>
                 </div>
               </div>
-            );
+            )
           })}
         </div>
-        <div className="mt-5 flex justify-center gap-4 text-xs font-medium text-slate-500 dark:text-slate-400">
-          <div className="flex items-center gap-1"><span>✅</span> {lang === 'zh' ? '達標' : 'Met'}</div>
-          <div className="flex items-center gap-1"><span>❌</span> {lang === 'zh' ? '未達標' : 'Over'}</div>
-          <div className="flex items-center gap-1"><span>☠️</span> {lang === 'zh' ? '嚴重超標' : 'Severe'}</div>
+        <div className="mt-4 flex gap-4 justify-center text-xs text-slate-500">
+          <div className="flex items-center gap-1"><div className="w-3 h-3 rounded-sm bg-green-500 flex items-center justify-center text-[8px] text-white">✅</div> {lang === 'zh' ? '達標' : 'Success'}</div>
+          <div className="flex items-center gap-1"><div className="w-3 h-3 rounded-sm bg-purple-500 flex items-center justify-center text-[8px] text-white">❌</div> {lang === 'zh' ? '未達標' : 'Failed'}</div>
+          <div className="flex items-center gap-1"><div className="w-3 h-3 rounded-sm bg-red-900 border border-red-500 flex items-center justify-center text-[8px] text-white">☠️</div> {lang === 'zh' ? '嚴重' : 'Danger'}</div>
         </div>
-      </div>
-
-      <div ref={dynamicParamsRef}>
-         <EditDynamicArea dynamicParams={dynamicParams} setDynamicParams={setDynamicParams} theme={theme} strings={strings} lang={lang} />
       </div>
 
       <div ref={recentRecordsRef} className={`p-6 rounded-3xl shadow border ${theme === 'dark' ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
         <h3 className="font-bold mb-4">{strings.recentRecords}</h3>
         <div className="space-y-3 max-h-72 overflow-y-auto pr-2">
-          {Array.from(new Set([...safeWeights.map(w=>w.date), ...safeMeals.map(m=>m.date)])).sort().reverse().slice(0, 15).map(date => {
-             const w = safeWeights.find(x => x.date === date)?.weight;
-             const mealCount = safeMeals.filter(m => m.date === date).length;
+          {Array.from(new Set([...weights.map(w=>w.date), ...meals.map(m=>m.date)])).sort().reverse().slice(0, 15).map(date => {
+             const w = weights.find(x => x.date === date)?.weight;
+             const mealCount = meals.filter(m => m.date === date).length;
              return (
                <div key={date} className={`p-3 rounded-2xl flex justify-between items-center border ${theme === 'dark' ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                 <span className="font-bold text-sm w-24">{date.substring(5)}</span>
+                 <span className="font-bold text-sm w-24 text-slate-900 dark:text-white">{date.substring(5)}</span>
                  <div className="flex gap-3 text-sm flex-1 justify-end">
                     <button onDoubleClick={() => { setActiveDate(date); setCurrentTab('weight'); }} 
                       className={`px-3 py-1 rounded-lg font-medium transition-colors ${w ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-200' : 'bg-slate-200 dark:bg-slate-700 text-slate-400 hover:bg-slate-300'}`}
@@ -1108,6 +1108,10 @@ function DashboardTab({ lang, setLang, theme, setTheme, profile, setProfile, dyn
              )
           })}
         </div>
+      </div>
+
+      <div ref={dynamicParamsRef}>
+         <EditDynamicArea dynamicParams={dynamicParams} setDynamicParams={setDynamicParams} theme={theme} strings={strings} lang={lang} />
       </div>
 
       <div ref={backupRef}>
@@ -1170,33 +1174,43 @@ function DashboardTab({ lang, setLang, theme, setTheme, profile, setProfile, dyn
 // ==========================================
 function EditDynamicArea({ dynamicParams, setDynamicParams, theme, strings, lang }) {
   const [date, setDate] = useState(getTodayDateStr());
-  const safeDynamicParams = Array.isArray(dynamicParams) ? dynamicParams : [];
-  const [height, setHeight] = useState(safeDynamicParams[0]?.height || 170);
-  const [deficit, setDeficit] = useState(safeDynamicParams[0]?.deficit || 300);
-  const [activity, setActivity] = useState(safeDynamicParams[0]?.activity || 1.2);
+  const [height, setHeight] = useState(dynamicParams[0]?.height || 170);
+  const [deficit, setDeficit] = useState(dynamicParams[0]?.deficit || 300);
+  const [activity, setActivity] = useState(dynamicParams[0]?.activity || 1.2);
   const [activeInfo, setActiveInfo] = useState(null);
+  const [isFormOpen, setIsFormOpen] = useState(false);
 
   const handleSave = (e) => {
     e.preventDefault();
     const newData = { effectiveDate: date, height: Number(height), deficit: Number(deficit), activity: Number(activity) };
     setDynamicParams(prev => {
-      const safePrev = Array.isArray(prev) ? prev : [];
-      const filtered = safePrev.filter(p => p.effectiveDate !== date);
+      const filtered = prev.filter(p => p.effectiveDate !== date);
       return [newData, ...filtered].sort((a,b) => new Date(b.effectiveDate) - new Date(a.effectiveDate));
     });
     alert(lang === 'zh' ? '動態目標更新成功！將於指定日期生效。' : 'Dynamic target updated successfully!');
+    setIsFormOpen(false);
   };
 
   const inputClass = "w-full px-4 py-3 rounded-xl border dark:bg-slate-900 dark:border-slate-700 text-slate-900 dark:text-white outline-none focus:border-blue-500 transition-colors";
   
   return (
     <div className={`p-6 rounded-3xl shadow border ${theme === 'dark' ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-      <h3 className="font-bold mb-4">{strings.editDynamic}</h3>
-      <form onSubmit={handleSave} className="space-y-4">
+      <div className="flex justify-between items-center cursor-pointer" onClick={() => setIsFormOpen(!isFormOpen)}>
+        <h3 className="font-bold flex items-center gap-2">{strings.editDynamic}</h3>
+        <button type="button" className="p-2 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-full transition-colors">
+           {isFormOpen ? <ChevronUp size={18}/> : <Plus size={18}/>}
+        </button>
+      </div>
+      
+      {isFormOpen && (
+      <form onSubmit={handleSave} className="space-y-4 mt-4 animate-in fade-in slide-in-from-top-2">
+        <div className="bg-yellow-50 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-200 p-3 rounded-lg text-xs leading-relaxed mb-4">
+          {lang === 'zh' ? '設定後將於指定生效日期起作用，不會影響過去的歷史紀錄計算。' : 'Changes will take effect from the selected date and will not affect past historical records.'}
+        </div>
         <div>
-          <label className="block text-sm font-medium mb-1 text-slate-500">{lang === 'zh' ? '生效日期 (過去紀錄不受影響)' : 'Effective Date'}</label>
+          <label className="block text-sm font-medium mb-1 text-slate-500">{lang === 'zh' ? '生效日期' : 'Effective Date'}</label>
           <div className="flex gap-2">
-            <input type="date" value={date} onChange={e => setDate(e.target.value)} required className={`${inputClass} dark:[color-scheme:dark] flex-1 text-center font-bold`} />
+            <input type="date" lang={lang === 'en' ? 'en-US' : 'zh-TW'} value={date} onChange={e => setDate(e.target.value)} required className={`${inputClass} dark:[color-scheme:dark] flex-1 text-center font-bold`} />
           </div>
         </div>
         <div>
@@ -1228,6 +1242,8 @@ function EditDynamicArea({ dynamicParams, setDynamicParams, theme, strings, lang
         </div>
         <button type="submit" className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md transition-colors">{strings.save}</button>
       </form>
+      )}
+      
       {activeInfo && <DynamicInfoModal type={activeInfo} onClose={() => setActiveInfo(null)} theme={theme} strings={strings} lang={lang} />}
     </div>
   );
