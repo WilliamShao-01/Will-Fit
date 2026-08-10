@@ -7,9 +7,6 @@ import {
   HelpCircle, AlertTriangle, X, Plus, ExternalLink, Download, Upload, FileText, Camera, Trash2
 } from 'lucide-react';
 
-// ==========================================
-// 0. Translations & Localization Data
-// ==========================================
 const t = {
   zh: {
     appName: "Will Fit",
@@ -191,9 +188,6 @@ const t = {
   }
 };
 
-// ==========================================
-// 1. Helper Functions
-// ==========================================
 const getTodayDateStr = () => {
   const d = new Date();
   const year = d.getFullYear();
@@ -269,9 +263,6 @@ const resizeImage = (dataUrl, maxWidth = 600) => {
   });
 };
 
-// ==========================================
-// 2. Main App Component
-// ==========================================
 export default function App() {
   const [profile, setProfile] = useState(() => {
     const saved = localStorage.getItem('willfit_profile');
@@ -301,13 +292,19 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [activeModal, setActiveModal] = useState(null); 
   const [dashboardScrollTarget, setDashboardScrollTarget] = useState(null);
+  
+  // Danger state and 5-second pulse effect logic
+  const [isDangerActive, setIsDangerActive] = useState(false);
   const [isDangerFlashing, setIsDangerFlashing] = useState(false);
 
   useEffect(() => { localStorage.setItem('willfit_profile', JSON.stringify(profile)); }, [profile]);
   useEffect(() => { localStorage.setItem('willfit_dynamicParams', JSON.stringify(dynamicParams)); }, [dynamicParams]);
   useEffect(() => { localStorage.setItem('willfit_weights', JSON.stringify(weights)); }, [weights]);
   useEffect(() => { localStorage.setItem('willfit_meals', JSON.stringify(meals)); }, [meals]);
-  useEffect(() => { localStorage.setItem('willfit_lang', lang); }, [lang]);
+  useEffect(() => { 
+    localStorage.setItem('willfit_lang', lang); 
+    document.documentElement.lang = lang === 'en' ? 'en-US' : 'zh-TW';
+  }, [lang]);
   useEffect(() => {
     localStorage.setItem('willfit_theme', theme);
     if (theme === 'dark') document.documentElement.classList.add('dark');
@@ -316,16 +313,37 @@ export default function App() {
 
   const strings = t[lang] || t.zh;
 
-  // Streak & Danger Calculation
   const streakData = useMemo(() => {
     let currentStreak = 0;
     let maxStreak = 0;
-    
-    // For danger calculation, we want to find the current active danger streak
-    let currentDangerStreak = 0;
-    let isDangerActive = true;
+    let consecutiveDangerDays = 0;
+    let foundDangerStart = false;
 
+    // Get all dates with meals, sorted descending
+    const datesWithMeals = [...new Set(meals.map(m => m.date))].sort().reverse();
+    
+    // Calculate danger streak
+    for (let i = 0; i < datesWithMeals.length; i++) {
+        const dateStr = datesWithMeals[i];
+        const dayMeals = meals.filter(m => m.date === dateStr);
+        const totalCal = dayMeals.reduce((acc, curr) => acc + curr.calories, 0);
+        const dyn = getActiveDynamicParam(dateStr, dynamicParams);
+        const wAvg = getEffectiveWeight(dateStr, weights);
+        const age = profile ? new Date().getFullYear() - profile.birthYear : 30;
+        const bmr = calculateBMR(profile?.gender || 'male', wAvg, dyn.height, age);
+        const targetCal = Math.round(bmr * dyn.activity - dyn.deficit);
+
+        if (totalCal >= targetCal + 750) {
+            consecutiveDangerDays++;
+        } else {
+            // Break the danger streak once a non-danger day is found
+            break;
+        }
+    }
+
+    // Calculate normal success streak
     const today = new Date();
+    let isStreakActive = true;
     for (let i = 0; i < 60; i++) {
       const d = new Date(today);
       d.setDate(today.getDate() - i);
@@ -333,48 +351,33 @@ export default function App() {
       
       const dayMeals = meals.filter(m => m.date === dateStr);
       if (dayMeals.length === 0) {
-        if (i === 0) {
-          // If today has no records, skip it without breaking streaks
-          continue;
-        } else {
-          // Empty past day breaks streaks
-          currentStreak = 0;
-          isDangerActive = false;
-        }
+        if (i > 0) isStreakActive = false;
         continue;
       }
 
       const totalCal = dayMeals.reduce((acc, curr) => acc + curr.calories, 0);
       const dyn = getActiveDynamicParam(dateStr, dynamicParams);
       const wAvg = getEffectiveWeight(dateStr, weights);
-      const age = new Date().getFullYear() - (profile?.birthYear || 1990);
+      const age = profile ? new Date().getFullYear() - profile.birthYear : 30;
       const bmr = calculateBMR(profile?.gender || 'male', wAvg, dyn.height, age);
       const targetCal = Math.round(bmr * dyn.activity - dyn.deficit);
 
-      // Normal Streak Check
-      if (totalCal > 0 && totalCal <= targetCal) {
-        currentStreak++;
-        if (currentStreak > maxStreak) maxStreak = currentStreak;
-      } else {
-        currentStreak = 0;
-      }
-
-      // Danger Streak Check
-      if (isDangerActive) {
-        if (totalCal >= targetCal + 750) {
-          currentDangerStreak++;
-        } else {
-          isDangerActive = false; // Breaking the danger streak
-        }
+      if (isStreakActive) {
+          if (totalCal > 0 && totalCal <= targetCal) {
+            currentStreak++;
+            if (currentStreak > maxStreak) maxStreak = currentStreak;
+          } else {
+            isStreakActive = false;
+          }
       }
     }
     
-    const isBleeding = currentDangerStreak >= 2;
-    return { currentStreak, maxStreak, isBleeding, consecutiveDangerDays: currentDangerStreak };
+    const isBleeding = consecutiveDangerDays >= 2;
+    return { currentStreak, maxStreak, isBleeding, consecutiveDangerDays };
   }, [meals, dynamicParams, weights, profile]);
 
-  // Handle Flashing Effect (Only 5 seconds on trigger)
   useEffect(() => {
+    setIsDangerActive(streakData.isBleeding);
     if (streakData.isBleeding) {
       setIsDangerFlashing(true);
       const timer = setTimeout(() => {
@@ -391,7 +394,7 @@ export default function App() {
   const todayTotalCal = todayMeals.reduce((acc, curr) => acc + curr.calories, 0);
   const todayDyn = getActiveDynamicParam(todayStr, dynamicParams);
   const todayWAvg = getEffectiveWeight(todayStr, weights);
-  const todayAge = new Date().getFullYear() - (profile?.birthYear || 1990);
+  const todayAge = profile ? new Date().getFullYear() - profile.birthYear : 30;
   const todayBmr = calculateBMR(profile?.gender || 'male', todayWAvg, todayDyn?.height || 170, todayAge);
   const todayTargetCal = Math.round(todayBmr * (todayDyn?.activity || 1.2) - (todayDyn?.deficit || 300));
   const todayRemainingCal = todayTargetCal - todayTotalCal;
@@ -403,13 +406,13 @@ export default function App() {
   return (
     <div className={`min-h-screen font-sans transition-colors duration-300 ${theme === 'dark' ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'} relative`}>
       
-      {/* Global Danger Border Overlay */}
-      {streakData.isBleeding && (
+      {/* Global Danger Border Overlay (Always red if active, pulses for first 5s) */}
+      {isDangerActive && (
         <div className={`pointer-events-none fixed inset-0 z-50 transition-all duration-1000 border-[6px] sm:border-[8px] border-red-500/80 shadow-[inset_0_0_30px_rgba(239,68,68,0.4)] ${isDangerFlashing ? 'animate-pulse bg-red-600/15' : 'bg-transparent'}`}></div>
       )}
 
       {/* Top Navigation Bar - Sticky */}
-      <header className={`sticky top-0 z-40 transition-all duration-300 shadow-md ${streakData.isBleeding ? 'bg-red-950 text-white border-b border-red-500' : (theme === 'dark' ? 'bg-slate-800 text-white border-b border-slate-700' : 'bg-white text-slate-800 border-b border-slate-200')}`}>
+      <header className={`sticky top-0 z-40 transition-all duration-300 shadow-md ${isDangerActive ? 'bg-red-950 text-white border-b border-red-500' : (theme === 'dark' ? 'bg-slate-800 text-white border-b border-slate-700' : 'bg-white text-slate-800 border-b border-slate-200')}`}>
         <div className="max-w-4xl mx-auto px-4 py-3 relative z-10 flex flex-col">
           <div className="flex items-center justify-between">
             <div className="flex flex-col">
@@ -426,7 +429,7 @@ export default function App() {
             </div>
 
             <div className="relative">
-              <button onClick={() => setIsSettingsOpen(!isSettingsOpen)} className={`p-2 rounded-xl transition-colors ${theme === 'dark' || streakData.isBleeding ? 'bg-white/10 hover:bg-white/20' : 'bg-slate-100 hover:bg-slate-200'}`}>
+              <button onClick={() => setIsSettingsOpen(!isSettingsOpen)} className={`p-2 rounded-xl transition-colors ${theme === 'dark' || isDangerActive ? 'bg-white/10 hover:bg-white/20' : 'bg-slate-100 hover:bg-slate-200'}`}>
                 <Settings className="w-5 h-5" />
               </button>
               
@@ -446,7 +449,7 @@ export default function App() {
             </div>
           </div>
           
-          {streakData.isBleeding && (
+          {isDangerActive && (
             <div className="mt-2 text-yellow-300 text-xs font-bold flex items-center">
               <AlertTriangle className="w-4 h-4 mr-1.5" />
               {strings.dangerStreak.replace('{days}', streakData.consecutiveDangerDays)}
@@ -475,9 +478,6 @@ export default function App() {
   );
 }
 
-// ==========================================
-// 3. Onboarding
-// ==========================================
 function Onboarding({ profile, setProfile, setDynamicParams, lang, setLang, theme, setTheme, strings }) {
   const [step, setStep] = useState(1);
   const [name, setName] = useState(profile?.name || 'Will');
@@ -524,10 +524,10 @@ function Onboarding({ profile, setProfile, setDynamicParams, lang, setLang, them
             </div>
             <div>
               <label className="block text-sm font-medium mb-1 text-slate-600 dark:text-slate-400">{strings.birthYear}</label>
-              <div className="flex gap-2">
-                <button type="button" onClick={() => setBirthYear(Number(birthYear) - 1)} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold text-lg">-</button>
-                <input type="number" value={birthYear} onChange={e => setBirthYear(e.target.value)} required className={`${inputClass} text-center font-bold`} />
-                <button type="button" onClick={() => setBirthYear(Number(birthYear) + 1)} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold text-lg">+</button>
+              <div className="flex gap-2 w-full">
+                <button type="button" onClick={() => setBirthYear(Number(birthYear) - 1)} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold text-lg shrink-0">-</button>
+                <input type="number" value={birthYear} onChange={e => setBirthYear(e.target.value)} required className={`${inputClass} text-center font-bold flex-1 min-w-0`} />
+                <button type="button" onClick={() => setBirthYear(Number(birthYear) + 1)} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold text-lg shrink-0">+</button>
               </div>
             </div>
             <button type="submit" className="w-full py-4 mt-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition-colors">{strings.next}</button>
@@ -537,10 +537,10 @@ function Onboarding({ profile, setProfile, setDynamicParams, lang, setLang, them
             <h3 className="font-bold border-b pb-2 dark:border-slate-700">{strings.editDynamic}</h3>
             <div>
               <label className="block text-sm font-medium mb-1 text-slate-600 dark:text-slate-400">{strings.height}</label>
-              <div className="flex gap-2">
-                <button type="button" onClick={() => setHeight(Math.max(0, Number(height) - 1))} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold text-lg">-</button>
-                <input type="number" value={height} onChange={e => setHeight(e.target.value)} required className={`${inputClass} text-center font-bold`} />
-                <button type="button" onClick={() => setHeight(Number(height) + 1)} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold text-lg">+</button>
+              <div className="flex gap-2 w-full">
+                <button type="button" onClick={() => setHeight(Math.max(0, Number(height) - 1))} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold text-lg shrink-0">-</button>
+                <input type="number" value={height} onChange={e => setHeight(e.target.value)} required className={`${inputClass} text-center font-bold flex-1 min-w-0`} />
+                <button type="button" onClick={() => setHeight(Number(height) + 1)} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold text-lg shrink-0">+</button>
               </div>
             </div>
             <div>
@@ -548,10 +548,10 @@ function Onboarding({ profile, setProfile, setDynamicParams, lang, setLang, them
                 {strings.deficitTarget}
                 <button type="button" onClick={() => setActiveInfo('deficit')} className="ml-2 text-blue-500 p-0.5 rounded-full hover:bg-blue-100 dark:hover:bg-blue-900"><HelpCircle className="w-4 h-4"/></button>
               </label>
-              <div className="flex gap-2">
-                <button type="button" onClick={() => setDeficit(Math.max(0, Number(deficit) - 50))} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold text-lg">-</button>
-                <input type="number" step="50" value={deficit} onChange={e => setDeficit(e.target.value)} required className={`${inputClass} text-center font-bold`} />
-                <button type="button" onClick={() => setDeficit(Number(deficit) + 50)} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold text-lg">+</button>
+              <div className="flex gap-2 w-full">
+                <button type="button" onClick={() => setDeficit(Math.max(0, Number(deficit) - 50))} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold text-lg shrink-0">-</button>
+                <input type="number" step="50" value={deficit} onChange={e => setDeficit(e.target.value)} required className={`${inputClass} text-center font-bold flex-1 min-w-0`} />
+                <button type="button" onClick={() => setDeficit(Number(deficit) + 50)} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold text-lg shrink-0">+</button>
               </div>
             </div>
             <div>
@@ -580,9 +580,6 @@ function Onboarding({ profile, setProfile, setDynamicParams, lang, setLang, them
   );
 }
 
-// ==========================================
-// 4. Tab 1: Weight Tracking
-// ==========================================
 function WeightTab({ lang, theme, profile, dynamicParams, weights, setWeights, activeDate, setActiveDate, strings }) {
   const [weightInput, setWeightInput] = useState('');
   const [showFormula, setShowFormula] = useState(false);
@@ -615,7 +612,6 @@ function WeightTab({ lang, theme, profile, dynamicParams, weights, setWeights, a
   const chartData = useMemo(() => {
     if (chartMode === 'daily') return weights.map(w => ({ date: w.date.substring(5), weight: w.weight }));
     
-    // Weekly avg
     const weeksMap = {};
     weights.forEach(w => {
       const d = new Date(w.date);
@@ -659,17 +655,17 @@ function WeightTab({ lang, theme, profile, dynamicParams, weights, setWeights, a
               <button type="button" onClick={() => changeDate(-1)} className={`px-4 rounded-xl border hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors ${theme === 'dark' ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-100 border-slate-200 text-slate-900'}`}><ChevronLeft size={20}/></button>
               <div className={`flex-1 flex justify-center items-center rounded-xl border py-2 gap-2 ${theme === 'dark' ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200 focus-within:border-blue-500'}`}>
                 <span className="text-xs text-slate-500 font-bold whitespace-nowrap">{getDayOfWeek(activeDate, lang)}</span>
-                <input type="date" lang={lang === 'en' ? 'en-US' : 'zh-TW'} value={activeDate} onChange={e => setActiveDate(e.target.value)} className="bg-transparent text-center font-bold outline-none dark:[color-scheme:dark] text-slate-900 dark:text-white" />
+                <input type="date" lang={lang === 'en' ? 'en-US' : 'zh-TW'} value={activeDate} onChange={e => setActiveDate(e.target.value)} style={{ colorScheme: theme === 'dark' ? 'dark' : 'light' }} className="bg-transparent text-center font-bold outline-none text-slate-900 dark:text-white" />
               </div>
               <button type="button" onClick={() => changeDate(1)} className={`px-4 rounded-xl border hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors ${theme === 'dark' ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-100 border-slate-200 text-slate-900'}`}><ChevronRight size={20}/></button>
             </div>
           </div>
           <div>
             <label className="block text-sm font-medium mb-1 text-slate-500">{strings.weight}</label>
-            <div className="flex gap-2">
-              <button type="button" onClick={() => setWeightInput(prev => Math.max(0, Number(prev||70)-0.1).toFixed(1))} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold text-lg hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors">-</button>
-              <input type="number" step="0.1" value={weightInput} onChange={e => setWeightInput(e.target.value)} required className={`${inputClass} text-center font-bold text-xl flex-1`} placeholder="70.0" />
-              <button type="button" onClick={() => setWeightInput(prev => (Number(prev||70)+0.1).toFixed(1))} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold text-lg hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors text-slate-900 dark:text-white">+</button>
+            <div className="flex gap-2 w-full">
+              <button type="button" onClick={() => setWeightInput(prev => Math.max(0, Number(prev||70)-0.1).toFixed(1))} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold text-lg hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors shrink-0">-</button>
+              <input type="number" step="0.1" value={weightInput} onChange={e => setWeightInput(e.target.value)} required className={`${inputClass} text-center font-bold text-xl flex-1 min-w-0`} placeholder="70.0" />
+              <button type="button" onClick={() => setWeightInput(prev => (Number(prev||70)+0.1).toFixed(1))} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold text-lg hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors text-slate-900 dark:text-white shrink-0">+</button>
             </div>
           </div>
           <button type="submit" className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg transition-colors">{strings.submit}</button>
@@ -742,9 +738,6 @@ function WeightTab({ lang, theme, profile, dynamicParams, weights, setWeights, a
   );
 }
 
-// ==========================================
-// 5. Tab 2: Diet Tracking
-// ==========================================
 function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals, activeDate, setActiveDate, strings }) {
   const [mealTime, setMealTime] = useState('12:00');
   const [mealName, setMealName] = useState('');
@@ -823,7 +816,7 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
         <button onClick={() => changeDate(-1)} className={`p-2 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors ${theme === 'dark' ? 'bg-slate-900' : 'bg-slate-100'}`}><ChevronLeft size={20}/></button>
         <div className="flex justify-center items-center gap-2">
           <span className="text-xs opacity-60 font-bold whitespace-nowrap">{getDayOfWeek(activeDate, lang)}</span>
-          <input type="date" lang={lang === 'en' ? 'en-US' : 'zh-TW'} value={activeDate} onChange={e => setActiveDate(e.target.value)} className="bg-transparent font-bold text-center outline-none dark:[color-scheme:dark] text-slate-900 dark:text-white" />
+          <input type="date" lang={lang === 'en' ? 'en-US' : 'zh-TW'} value={activeDate} onChange={e => setActiveDate(e.target.value)} style={{ colorScheme: theme === 'dark' ? 'dark' : 'light' }} className="bg-transparent font-bold text-center outline-none text-slate-900 dark:text-white" />
         </div>
         <button onClick={() => changeDate(1)} className={`p-2 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors ${theme === 'dark' ? 'bg-slate-900' : 'bg-slate-100'}`}><ChevronRight size={20}/></button>
       </div>
@@ -861,14 +854,14 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
           <div className="flex gap-3">
             <div className="w-1/3">
               <label className="block text-xs font-bold mb-1 text-slate-500">{strings.mealTime}</label>
-              <input type="time" lang={lang === 'en' ? 'en-US' : 'zh-TW'} value={mealTime} onChange={e => setMealTime(e.target.value)} required className={inputClass} />
+              <input type="time" lang={lang === 'en' ? 'en-US' : 'zh-TW'} value={mealTime} onChange={e => setMealTime(e.target.value)} required style={{ colorScheme: theme === 'dark' ? 'dark' : 'light' }} className={inputClass} />
             </div>
             <div className="w-2/3">
               <label className="block text-xs font-bold mb-1 text-slate-500">{strings.mealCal}</label>
-              <div className="flex gap-2">
-                <button type="button" onClick={() => setMealCal(Math.max(0,Number(mealCal||0)-50))} className="px-3 bg-slate-200 dark:bg-slate-700 rounded-xl text-lg font-bold hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors">-</button>
-                <input type="number" step="10" value={mealCal} onChange={e => setMealCal(e.target.value)} required className={`${inputClass} text-center font-bold flex-1`} placeholder="450" />
-                <button type="button" onClick={() => setMealCal(Number(mealCal||0)+50)} className="px-3 bg-slate-200 dark:bg-slate-700 rounded-xl text-lg font-bold hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors">+</button>
+              <div className="flex gap-2 w-full">
+                <button type="button" onClick={() => setMealCal(Math.max(0,Number(mealCal||0)-50))} className="px-3 bg-slate-200 dark:bg-slate-700 rounded-xl text-lg font-bold hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors shrink-0">-</button>
+                <input type="number" step="10" value={mealCal} onChange={e => setMealCal(e.target.value)} required className={`${inputClass} text-center font-bold flex-1 min-w-0`} placeholder="450" />
+                <button type="button" onClick={() => setMealCal(Number(mealCal||0)+50)} className="px-3 bg-slate-200 dark:bg-slate-700 rounded-xl text-lg font-bold hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors shrink-0">+</button>
               </div>
             </div>
           </div>
@@ -953,9 +946,6 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
   );
 }
 
-// ==========================================
-// 6. Tab 3: Dashboard & Settings
-// ==========================================
 function DashboardTab({ lang, setLang, theme, setTheme, profile, setProfile, dynamicParams, setDynamicParams, weights, setWeights, meals, setMeals, streakData, scrollTarget, setScrollTarget, setCurrentTab, setActiveDate, strings }) {
   const basicInfoRef = useRef(null);
   const dynamicParamsRef = useRef(null);
@@ -970,7 +960,7 @@ function DashboardTab({ lang, setLang, theme, setTheme, profile, setProfile, dyn
         const refs = { profile: basicInfoRef, dynamic: dynamicParamsRef, backup: backupRef, recent: recentRecordsRef };
         const target = refs[scrollTarget];
         if (target && target.current) {
-          target.current.scrollIntoView({ behavior: 'smooth', block: 'center' }); // 置中滾動
+          target.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
         setScrollTarget(null);
       }, 100);
@@ -1033,7 +1023,6 @@ function DashboardTab({ lang, setLang, theme, setTheme, profile, setProfile, dyn
         </div>
       </div>
 
-      {/* 數據統計區塊 (Data Stats) */}
       <div className="grid grid-cols-3 gap-3">
         <div className={`p-3 rounded-2xl shadow-sm text-center border ${theme === 'dark' ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
           <div className="text-xs text-slate-500 mb-1">{strings.streak}</div>
@@ -1049,7 +1038,6 @@ function DashboardTab({ lang, setLang, theme, setTheme, profile, setProfile, dyn
         </div>
       </div>
 
-      {/* 飲食達成率熱力圖 (Heatmap) */}
       <div className={`p-6 rounded-3xl shadow border ${theme === 'dark' ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
         <h3 className="font-bold mb-4">{strings.heatmapTitle}</h3>
         <div className="grid grid-cols-7 gap-2">
@@ -1136,10 +1124,10 @@ function DashboardTab({ lang, setLang, theme, setTheme, profile, setProfile, dyn
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1 opacity-80">{strings.birthYear}</label>
-                <div className="flex gap-2">
-                  <button type="button" onClick={() => setEditProfileForm(p => ({...p, birthYear: Number(p.birthYear) - 1}))} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold text-lg">-</button>
-                  <input type="number" value={editProfileForm.birthYear} onChange={e => setEditProfileForm({...editProfileForm, birthYear: e.target.value})} required className="w-full text-center px-4 py-3 rounded-xl border dark:bg-slate-900 dark:border-slate-700 text-slate-900 dark:text-white outline-none font-bold" />
-                  <button type="button" onClick={() => setEditProfileForm(p => ({...p, birthYear: Number(p.birthYear) + 1}))} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold text-lg">+</button>
+                <div className="flex gap-2 w-full">
+                  <button type="button" onClick={() => setEditProfileForm(p => ({...p, birthYear: Number(p.birthYear) - 1}))} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold text-lg shrink-0">-</button>
+                  <input type="number" value={editProfileForm.birthYear} onChange={e => setEditProfileForm({...editProfileForm, birthYear: e.target.value})} required className="w-full text-center px-4 py-3 rounded-xl border dark:bg-slate-900 dark:border-slate-700 text-slate-900 dark:text-white outline-none font-bold flex-1 min-w-0" />
+                  <button type="button" onClick={() => setEditProfileForm(p => ({...p, birthYear: Number(p.birthYear) + 1}))} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold text-lg shrink-0">+</button>
                 </div>
               </div>
               
@@ -1168,10 +1156,6 @@ function DashboardTab({ lang, setLang, theme, setTheme, profile, setProfile, dyn
   );
 }
 
-
-// ==========================================
-// 7. Sub-components (Areas & Modals)
-// ==========================================
 function EditDynamicArea({ dynamicParams, setDynamicParams, theme, strings, lang }) {
   const [date, setDate] = useState(getTodayDateStr());
   const [height, setHeight] = useState(dynamicParams[0]?.height || 170);
@@ -1204,21 +1188,21 @@ function EditDynamicArea({ dynamicParams, setDynamicParams, theme, strings, lang
       
       {isFormOpen && (
       <form onSubmit={handleSave} className="space-y-4 mt-4 animate-in fade-in slide-in-from-top-2">
-        <div className="bg-yellow-50 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-200 p-3 rounded-lg text-xs leading-relaxed mb-4">
+        <div className="bg-amber-100 dark:bg-amber-900/30 text-amber-900 dark:text-amber-200 p-3 rounded-lg text-xs leading-relaxed font-medium">
           {lang === 'zh' ? '設定後將於指定生效日期起作用，不會影響過去的歷史紀錄計算。' : 'Changes will take effect from the selected date and will not affect past historical records.'}
         </div>
         <div>
           <label className="block text-sm font-medium mb-1 text-slate-500">{lang === 'zh' ? '生效日期' : 'Effective Date'}</label>
-          <div className="flex gap-2">
-            <input type="date" lang={lang === 'en' ? 'en-US' : 'zh-TW'} value={date} onChange={e => setDate(e.target.value)} required className={`${inputClass} dark:[color-scheme:dark] flex-1 text-center font-bold`} />
+          <div className="flex gap-2 w-full">
+            <input type="date" lang={lang === 'en' ? 'en-US' : 'zh-TW'} value={date} onChange={e => setDate(e.target.value)} required style={{ colorScheme: theme === 'dark' ? 'dark' : 'light' }} className={`${inputClass} flex-1 text-center font-bold min-w-0`} />
           </div>
         </div>
         <div>
           <label className="block text-sm font-medium mb-1 text-slate-500">{strings.height}</label>
-          <div className="flex gap-2">
-            <button type="button" onClick={() => setHeight(Math.max(0, Number(height) - 1))} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold hover:bg-slate-300 transition-colors">-</button>
-            <input type="number" step="0.5" value={height} onChange={e => setHeight(e.target.value)} required className={`${inputClass} text-center font-bold`} />
-            <button type="button" onClick={() => setHeight(Number(height) + 1)} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold hover:bg-slate-300 transition-colors">+</button>
+          <div className="flex gap-2 w-full">
+            <button type="button" onClick={() => setHeight(Math.max(0, Number(height) - 1))} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold hover:bg-slate-300 transition-colors shrink-0">-</button>
+            <input type="number" step="0.5" value={height} onChange={e => setHeight(e.target.value)} required className={`${inputClass} text-center font-bold flex-1 min-w-0`} />
+            <button type="button" onClick={() => setHeight(Number(height) + 1)} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold hover:bg-slate-300 transition-colors shrink-0">+</button>
           </div>
         </div>
         <div className="grid grid-cols-2 gap-4">
