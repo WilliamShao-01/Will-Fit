@@ -215,14 +215,16 @@ const calculateBMR = (gender, weight, height, age) => {
 };
 
 const getActiveDynamicParam = (dateStr, dynamicParamsList) => {
-  if (!dynamicParamsList || dynamicParamsList.length === 0) return { height: 170, deficit: 300, activity: 1.2 };
-  const sorted = [...dynamicParamsList].sort((a, b) => new Date(b.effectiveDate) - new Date(a.effectiveDate));
+  const safeList = Array.isArray(dynamicParamsList) ? dynamicParamsList : [];
+  if (safeList.length === 0) return { height: 170, deficit: 300, activity: 1.2 };
+  const sorted = [...safeList].sort((a, b) => new Date(b.effectiveDate) - new Date(a.effectiveDate));
   const found = sorted.find(p => p.effectiveDate <= dateStr);
   return found || sorted[sorted.length - 1];
 };
 
 const getEffectiveWeight = (targetDateStr, weightsList) => {
-  if (!weightsList || weightsList.length === 0) return 70;
+  const safeList = Array.isArray(weightsList) ? weightsList : [];
+  if (safeList.length === 0) return 70;
   
   const targetDate = new Date(targetDateStr);
   const day = targetDate.getDay();
@@ -235,7 +237,7 @@ const getEffectiveWeight = (targetDateStr, weightsList) => {
   const prevSunday = new Date(currentMonday);
   prevSunday.setDate(prevSunday.getDate() - 1);
 
-  const prevWeekWeights = weightsList.filter(w => {
+  const prevWeekWeights = safeList.filter(w => {
     const dt = new Date(w.date);
     return dt >= prevMonday && dt <= prevSunday;
   });
@@ -245,7 +247,7 @@ const getEffectiveWeight = (targetDateStr, weightsList) => {
     return sum / prevWeekWeights.length;
   }
 
-  const sorted = [...weightsList].sort((a, b) => new Date(a.date) - new Date(b.date));
+  const sorted = [...safeList].sort((a, b) => new Date(a.date) - new Date(b.date));
   return sorted[0].weight;
 };
 
@@ -279,15 +281,18 @@ export default function App() {
   });
   const [dynamicParams, setDynamicParams] = useState(() => {
     const saved = localStorage.getItem('willfit_dynamicParams');
-    return saved ? JSON.parse(saved) : [];
+    const parsed = saved ? JSON.parse(saved) : [];
+    return Array.isArray(parsed) ? parsed : [];
   });
   const [weights, setWeights] = useState(() => {
     const saved = localStorage.getItem('willfit_weights');
-    return saved ? JSON.parse(saved) : [];
+    const parsed = saved ? JSON.parse(saved) : [];
+    return Array.isArray(parsed) ? parsed : [];
   });
   const [meals, setMeals] = useState(() => {
     const saved = localStorage.getItem('willfit_meals');
-    return saved ? JSON.parse(saved) : [];
+    const parsed = saved ? JSON.parse(saved) : [];
+    return Array.isArray(parsed) ? parsed : [];
   });
   const [lang, setLang] = useState(() => {
     return localStorage.getItem('willfit_lang') || 'zh';
@@ -326,12 +331,16 @@ export default function App() {
     let isDangerActive = true;
 
     const today = new Date();
+    const safeMeals = Array.isArray(meals) ? meals : [];
+    const safeDynamicParams = Array.isArray(dynamicParams) ? dynamicParams : [];
+    const safeWeights = Array.isArray(weights) ? weights : [];
+
     for (let i = 0; i < 60; i++) {
       const d = new Date(today);
       d.setDate(today.getDate() - i);
       const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
       
-      const dayMeals = meals.filter(m => m.date === dateStr);
+      const dayMeals = safeMeals.filter(m => m.date === dateStr);
       if (dayMeals.length === 0) {
         if (i === 0) {
           // If today has no records, skip it without breaking streaks
@@ -345,8 +354,8 @@ export default function App() {
       }
 
       const totalCal = dayMeals.reduce((acc, curr) => acc + curr.calories, 0);
-      const dyn = getActiveDynamicParam(dateStr, dynamicParams);
-      const wAvg = getEffectiveWeight(dateStr, weights);
+      const dyn = getActiveDynamicParam(dateStr, safeDynamicParams);
+      const wAvg = getEffectiveWeight(dateStr, safeWeights);
       const age = new Date().getFullYear() - (profile?.birthYear || 1990);
       const bmr = calculateBMR(profile?.gender || 'male', wAvg, dyn.height, age);
       const targetCal = Math.round(bmr * dyn.activity - dyn.deficit);
@@ -387,7 +396,10 @@ export default function App() {
   }, [streakData.isBleeding]);
 
   const todayStr = getTodayDateStr();
-  const todayMeals = meals.filter(m => m.date === todayStr);
+  const safeMeals = Array.isArray(meals) ? meals : [];
+  const safeWeights = Array.isArray(weights) ? weights : [];
+  
+  const todayMeals = safeMeals.filter(m => m.date === todayStr);
   const todayTotalCal = todayMeals.reduce((acc, curr) => acc + curr.calories, 0);
   const todayDyn = getActiveDynamicParam(todayStr, dynamicParams);
   const todayWAvg = getEffectiveWeight(todayStr, weights);
@@ -396,7 +408,7 @@ export default function App() {
   const todayTargetCal = Math.round(todayBmr * (todayDyn?.activity || 1.2) - (todayDyn?.deficit || 300));
   const todayRemainingCal = todayTargetCal - todayTotalCal;
 
-  if (!profile || dynamicParams.length === 0) {
+  if (!profile || (Array.isArray(dynamicParams) ? dynamicParams : []).length === 0) {
     return <Onboarding profile={profile} setProfile={setProfile} setDynamicParams={setDynamicParams} lang={lang} setLang={setLang} theme={theme} setTheme={setTheme} strings={strings} />;
   }
 
@@ -417,7 +429,7 @@ export default function App() {
                 {strings.appName}
               </h1>
               <div className="flex items-center space-x-3 text-xs font-medium opacity-90 mt-1">
-                <span>{weights.find(w => w.date === todayStr)?.weight || '--'} kg</span>
+                <span>{safeWeights.find(w => w.date === todayStr)?.weight || '--'} kg</span>
                 <span>|</span>
                 <span>{strings.remainingCal}: <strong className={`${todayRemainingCal < 0 ? 'text-red-400 font-bold' : ''}`}>{todayRemainingCal}</strong></span>
                 <span>|</span>
@@ -590,8 +602,10 @@ function WeightTab({ lang, theme, profile, dynamicParams, weights, setWeights, a
   const [chartMode, setChartMode] = useState('daily'); 
   const resultRef = useRef(null);
 
+  const safeWeights = Array.isArray(weights) ? weights : [];
+
   useEffect(() => {
-    const existing = weights.find(w => w.date === activeDate);
+    const existing = safeWeights.find(w => w.date === activeDate);
     setWeightInput(existing ? existing.weight : '');
   }, [activeDate, weights]);
 
@@ -599,7 +613,8 @@ function WeightTab({ lang, theme, profile, dynamicParams, weights, setWeights, a
     e.preventDefault();
     if (!weightInput) return;
     setWeights(prev => {
-      const filtered = prev.filter(w => w.date !== activeDate);
+      const safePrev = Array.isArray(prev) ? prev : [];
+      const filtered = safePrev.filter(w => w.date !== activeDate);
       return [...filtered, { date: activeDate, weight: Number(weightInput) }].sort((a, b) => new Date(a.date) - new Date(b.date));
     });
     setTimeout(() => { resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 100);
@@ -613,11 +628,11 @@ function WeightTab({ lang, theme, profile, dynamicParams, weights, setWeights, a
   const targetCal = tdee - dyn.deficit;
 
   const chartData = useMemo(() => {
-    if (chartMode === 'daily') return weights.map(w => ({ date: w.date.substring(5), weight: w.weight }));
+    if (chartMode === 'daily') return safeWeights.map(w => ({ date: w.date.substring(5), weight: w.weight }));
     
     // Weekly avg
     const weeksMap = {};
-    weights.forEach(w => {
+    safeWeights.forEach(w => {
       const d = new Date(w.date);
       const day = d.getDay();
       const diff = d.getDate() - day + (day === 0 ? -6 : 1);
@@ -746,7 +761,8 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
   const [editingMealId, setEditingMealId] = useState(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
 
-  const dayMeals = meals.filter(m => m.date === activeDate);
+  const safeMeals = Array.isArray(meals) ? meals : [];
+  const dayMeals = safeMeals.filter(m => m.date === activeDate);
   const totalCal = dayMeals.reduce((acc, curr) => acc + curr.calories, 0);
   const dyn = getActiveDynamicParam(activeDate, dynamicParams);
   const wAvg = getEffectiveWeight(activeDate, weights);
@@ -775,7 +791,7 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
       });
     }));
 
-    setPhotos(prev => [...prev, ...newPhotos]);
+    setPhotos(prev => [...(Array.isArray(prev) ? prev : []), ...newPhotos]);
     e.target.value = '';
   };
 
@@ -783,10 +799,10 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
     e.preventDefault();
     if (!mealName || !mealCal) return;
     if (editingMealId) {
-      setMeals(prev => prev.map(m => m.id === editingMealId ? { ...m, time: mealTime, name: mealName, calories: Number(mealCal), photos } : m));
+      setMeals(prev => (Array.isArray(prev) ? prev : []).map(m => m.id === editingMealId ? { ...m, time: mealTime, name: mealName, calories: Number(mealCal), photos } : m));
       setEditingMealId(null);
     } else {
-      setMeals(prev => [...prev, { id: Date.now().toString(), date: activeDate, time: mealTime, name: mealName, calories: Number(mealCal), photos }]);
+      setMeals(prev => [...(Array.isArray(prev) ? prev : []), { id: Date.now().toString(), date: activeDate, time: mealTime, name: mealName, calories: Number(mealCal), photos }]);
     }
     setMealName(''); setMealCal(''); setPhotos([]);
   };
@@ -861,10 +877,10 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
           <div>
             <label className="block text-xs font-bold mb-2 text-slate-500">{strings.photos}</label>
             <div className="flex flex-wrap gap-3">
-              {photos.map((url, idx) => (
+              {(Array.isArray(photos) ? photos : []).map((url, idx) => (
                 <div key={idx} className="relative w-20 h-20 group">
                   <img src={url} alt={`preview-${idx}`} className="w-full h-full object-cover rounded-xl border border-slate-200 dark:border-slate-600" />
-                  <button type="button" onClick={() => setPhotos(prev => prev.filter((_, i) => i !== idx))} 
+                  <button type="button" onClick={() => setPhotos(prev => (Array.isArray(prev) ? prev : []).filter((_, i) => i !== idx))} 
                     className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-md hover:scale-110 transition-transform">
                     <X size={12} />
                   </button>
@@ -902,7 +918,7 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
               </div>
               {m.photos && m.photos.length > 0 && (
                 <div className="flex gap-2 overflow-x-auto ml-16 pb-1">
-                  {m.photos.map((p, i) => (
+                  {(Array.isArray(m.photos) ? m.photos : []).map((p, i) => (
                     <img key={i} src={p} alt="meal" onClick={(e) => { e.stopPropagation(); setSelectedPhoto(p); }} 
                       className="w-16 h-16 object-cover rounded-xl border border-slate-200 dark:border-slate-700 shrink-0 cursor-pointer" />
                   ))}
@@ -919,7 +935,7 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
             <h4 className="font-bold mb-4">{lang === 'zh' ? '確認刪除此餐點？' : 'Delete this meal?'}</h4>
             <div className="flex gap-4">
               <button onClick={() => setDeleteConfirmId(null)} className="w-1/2 py-3 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold">{strings.cancel}</button>
-              <button onClick={() => { setMeals(prev => prev.filter(m => m.id !== deleteConfirmId)); setDeleteConfirmId(null); }} className="w-1/2 py-3 bg-red-600 text-white font-bold rounded-xl shadow-lg">{strings.confirmDelete}</button>
+              <button onClick={() => { setMeals(prev => (Array.isArray(prev) ? prev : []).filter(m => m.id !== deleteConfirmId)); setDeleteConfirmId(null); }} className="w-1/2 py-3 bg-red-600 text-white font-bold rounded-xl shadow-lg">{strings.confirmDelete}</button>
             </div>
           </div>
         </div>
@@ -944,6 +960,9 @@ function DashboardTab({ lang, setLang, theme, setTheme, profile, setProfile, dyn
   const recentRecordsRef = useRef(null);
   const [showEditProfileModal, setShowEditProfileModal] = useState(false);
   const [editProfileForm, setEditProfileForm] = useState({ name: profile.name, gender: profile.gender, birthYear: profile.birthYear });
+
+  const safeMeals = Array.isArray(meals) ? meals : [];
+  const safeWeights = Array.isArray(weights) ? weights : [];
 
   useEffect(() => {
     if (scrollTarget) {
@@ -972,10 +991,10 @@ function DashboardTab({ lang, setLang, theme, setTheme, profile, setProfile, dyn
       d.setDate(today.getDate() - i);
       const dateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
       
-      const dayMeals = meals.filter(m => m.date === dateStr);
+      const dayMeals = safeMeals.filter(m => m.date === dateStr);
       const total = dayMeals.reduce((acc, curr) => acc + curr.calories, 0);
       const dyn = getActiveDynamicParam(dateStr, dynamicParams);
-      const bmr = calculateBMR(profile?.gender || 'male', getEffectiveWeight(dateStr, weights), dyn.height, new Date().getFullYear() - (profile?.birthYear || 1990));
+      const bmr = calculateBMR(profile?.gender || 'male', getEffectiveWeight(dateStr, safeWeights), dyn.height, new Date().getFullYear() - (profile?.birthYear || 1990));
       const target = Math.round(bmr * dyn.activity - dyn.deficit);
 
       let status = 'none';
@@ -990,7 +1009,7 @@ function DashboardTab({ lang, setLang, theme, setTheme, profile, setProfile, dyn
   }, [meals, dynamicParams, weights, profile]);
 
   const avgCal30 = useMemo(() => {
-    const last30 = meals.filter(m => {
+    const last30 = safeMeals.filter(m => {
        const dt = new Date(m.date);
        const daysAgo = (new Date().getTime() - dt.getTime()) / (1000 * 3600 * 24);
        return daysAgo <= 30;
@@ -1067,9 +1086,9 @@ function DashboardTab({ lang, setLang, theme, setTheme, profile, setProfile, dyn
       <div ref={recentRecordsRef} className={`p-6 rounded-3xl shadow border ${theme === 'dark' ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
         <h3 className="font-bold mb-4">{strings.recentRecords}</h3>
         <div className="space-y-3 max-h-72 overflow-y-auto pr-2">
-          {Array.from(new Set([...weights.map(w=>w.date), ...meals.map(m=>m.date)])).sort().reverse().slice(0, 15).map(date => {
-             const w = weights.find(x => x.date === date)?.weight;
-             const mealCount = meals.filter(m => m.date === date).length;
+          {Array.from(new Set([...safeWeights.map(w=>w.date), ...safeMeals.map(m=>m.date)])).sort().reverse().slice(0, 15).map(date => {
+             const w = safeWeights.find(x => x.date === date)?.weight;
+             const mealCount = safeMeals.filter(m => m.date === date).length;
              return (
                <div key={date} className={`p-3 rounded-2xl flex justify-between items-center border ${theme === 'dark' ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
                  <span className="font-bold text-sm w-24">{date.substring(5)}</span>
@@ -1151,16 +1170,18 @@ function DashboardTab({ lang, setLang, theme, setTheme, profile, setProfile, dyn
 // ==========================================
 function EditDynamicArea({ dynamicParams, setDynamicParams, theme, strings, lang }) {
   const [date, setDate] = useState(getTodayDateStr());
-  const [height, setHeight] = useState(dynamicParams[0]?.height || 170);
-  const [deficit, setDeficit] = useState(dynamicParams[0]?.deficit || 300);
-  const [activity, setActivity] = useState(dynamicParams[0]?.activity || 1.2);
+  const safeDynamicParams = Array.isArray(dynamicParams) ? dynamicParams : [];
+  const [height, setHeight] = useState(safeDynamicParams[0]?.height || 170);
+  const [deficit, setDeficit] = useState(safeDynamicParams[0]?.deficit || 300);
+  const [activity, setActivity] = useState(safeDynamicParams[0]?.activity || 1.2);
   const [activeInfo, setActiveInfo] = useState(null);
 
   const handleSave = (e) => {
     e.preventDefault();
     const newData = { effectiveDate: date, height: Number(height), deficit: Number(deficit), activity: Number(activity) };
     setDynamicParams(prev => {
-      const filtered = prev.filter(p => p.effectiveDate !== date);
+      const safePrev = Array.isArray(prev) ? prev : [];
+      const filtered = safePrev.filter(p => p.effectiveDate !== date);
       return [newData, ...filtered].sort((a,b) => new Date(b.effectiveDate) - new Date(a.effectiveDate));
     });
     alert(lang === 'zh' ? '動態目標更新成功！將於指定日期生效。' : 'Dynamic target updated successfully!');
