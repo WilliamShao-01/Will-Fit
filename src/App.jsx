@@ -70,7 +70,7 @@ const t = {
     importInstruction: "資料備份與匯入 (其他APP也可，詳見「i」)",
     deleteConfirmTitle: "確定要刪除所有資料嗎？",
     deleteConfirmDesc: "此動作無法復原！刪除前請務必先備份您的資料。",
-    formulaDesc: "算式與數值說明",
+    formulaDesc: "每日熱量消耗與目標",
     viewModal: "檢視照片",
     editMeal: "修改餐點",
     update: "更新",
@@ -96,7 +96,13 @@ const t = {
     copyPrompt: "複製給 AI 的指令",
     copied: "指令已複製！",
     target: "目標",
-    intake: "已攝取"
+    intake: "已攝取",
+    bmrDesc: "你在靜止休息狀態下，身體維持運作所需的最低熱量。",
+    tdeeDesc: "包含日常活動與運動後，你一天總共消耗的熱量。",
+    importHelp1: "您可以直接匯入從本程式匯出的 .json 備份檔。",
+    importHelp2: "若是從其他 APP 匯出的資料，您可以複製下方指令交給 AI（如 ChatGPT），請它幫您轉換成可匯入的格式：",
+    todayInfo: "今日",
+    streakInfo: "連續達標"
   },
   en: {
     appName: "Will Fit",
@@ -160,7 +166,7 @@ const t = {
     importInstruction: "Backup & Import (See Help)",
     deleteConfirmTitle: "Delete all data?",
     deleteConfirmDesc: "Cannot be undone! Please backup first.",
-    formulaDesc: "Formula Details",
+    formulaDesc: "Daily Burn & Target",
     viewModal: "View Photo",
     editMeal: "Edit Meal",
     update: "Update",
@@ -186,7 +192,13 @@ const t = {
     copyPrompt: "Copy AI Prompt",
     copied: "Copied!",
     target: "Target",
-    intake: "Intake"
+    intake: "Intake",
+    bmrDesc: "The minimum calories your body needs at rest to function.",
+    tdeeDesc: "The total calories you burn in a day, including physical activities.",
+    importHelp1: "You can directly import the .json backup file exported from this app.",
+    importHelp2: "If exporting from another app, copy the prompt below to an AI (like ChatGPT) to convert your data:",
+    todayInfo: "Today",
+    streakInfo: "Streak"
   }
 };
 
@@ -286,7 +298,13 @@ export default function App() {
     return localStorage.getItem('willfit_lang') || 'zh';
   });
   const [theme, setTheme] = useState(() => {
-    return localStorage.getItem('willfit_theme') || 'dark';
+    // 預設先檢查本地儲存，若無則偵測系統偏好
+    const saved = localStorage.getItem('willfit_theme');
+    if (saved) return saved;
+    if (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      return 'dark';
+    }
+    return 'light';
   });
 
   const [currentTab, setCurrentTab] = useState('weight'); 
@@ -306,6 +324,27 @@ export default function App() {
     localStorage.setItem('willfit_lang', lang); 
     document.documentElement.lang = lang === 'en' ? 'en-US' : 'zh-TW';
   }, [lang]);
+  
+  // 監聽系統主題變化
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    
+    const handleChange = (e) => {
+      // 只有在沒有強制設定過本地儲存的情況下，才自動跟隨系統切換
+      // 但為了確保體驗一致性，這裡設定為永遠跟隨系統
+      const newTheme = e.matches ? 'dark' : 'light';
+      setTheme(newTheme);
+    };
+
+    // 初始設定一次
+    handleChange(mediaQuery);
+
+    // 監聽變化
+    mediaQuery.addEventListener('change', handleChange);
+    
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, []);
+
   useEffect(() => {
     localStorage.setItem('willfit_theme', theme);
     if (theme === 'dark') document.documentElement.classList.add('dark');
@@ -422,7 +461,7 @@ export default function App() {
   const todayRemainingCal = todayTargetCal - todayTotalCal;
 
   if (!profile || dynamicParams.length === 0) {
-    return <Onboarding profile={profile} setProfile={setProfile} setDynamicParams={setDynamicParams} lang={lang} setLang={setLang} theme={theme} setTheme={setTheme} strings={strings} />;
+    return <Onboarding profile={profile} setProfile={setProfile} setDynamicParams={setDynamicParams} lang={lang} setLang={setLang} strings={strings} />;
   }
 
   return (
@@ -442,11 +481,11 @@ export default function App() {
                 Will Fit
               </h1>
               <div className="flex items-center space-x-3 text-xs font-medium opacity-90 mt-1">
-                <span>{weights.find(w => w.date === todayStr)?.weight || '--'} kg</span>
+                <span>{strings.todayInfo}：{weights.find(w => w.date === todayStr)?.weight || '--'} kg</span>
                 <span>|</span>
-                <span>{strings.remainingCal}: <strong className={`${todayRemainingCal < 0 ? 'text-red-400 font-bold' : ''}`}>{todayRemainingCal}</strong></span>
+                <span>{strings.remainingCal}：<strong className={`${todayRemainingCal < 0 ? 'text-red-400 font-bold' : ''}`}>{todayRemainingCal}</strong></span>
                 <span>|</span>
-                <span>{streakData.currentStreak} {strings.streakDays}</span>
+                <span>{strings.streakInfo}：{streakData.currentStreak} {strings.streakDays}</span>
               </div>
             </div>
 
@@ -533,7 +572,7 @@ function Modal({ isOpen, onClose, title, children }) {
 // ----------------------------------------------------------------------
 // Onboarding Component
 // ----------------------------------------------------------------------
-function Onboarding({ profile, setProfile, setDynamicParams, lang, setLang, theme, setTheme, strings }) {
+function Onboarding({ profile, setProfile, setDynamicParams, lang, setLang, strings }) {
   const [step, setStep] = useState(1);
   const [name, setName] = useState(profile?.name || 'Will');
   const [gender, setGender] = useState(profile?.gender || 'male');
@@ -553,12 +592,11 @@ function Onboarding({ profile, setProfile, setDynamicParams, lang, setLang, them
   const btnClass = "px-3 py-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg text-xs font-bold hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors";
 
   return (
-    <div className={`min-h-screen flex items-center justify-center p-4 transition-colors ${theme === 'dark' ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
-      <div className={`w-full max-w-md p-6 sm:p-8 rounded-3xl shadow-xl border ${theme === 'dark' ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+    <div className="min-h-screen flex items-center justify-center p-4 transition-colors bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100">
+      <div className="w-full max-w-md p-6 sm:p-8 rounded-3xl shadow-xl border bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-bold">Will Fit</h2>
           <div className="flex gap-2">
-            <button type="button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className={btnClass}>{theme === 'dark' ? 'Light' : 'Dark'}</button>
             <button type="button" onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')} className={btnClass}>{lang === 'zh' ? 'EN' : '中文'}</button>
           </div>
         </div>
@@ -688,7 +726,9 @@ function WeightTab({ lang, theme, profile, dynamicParams, weights, setWeights, a
   const changeDate = (days) => {
     const d = new Date(activeDate);
     d.setDate(d.getDate() + days);
-    setActiveDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+    const newDateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    if (newDateStr > getTodayDateStr()) return; // 防止選擇未來的日期
+    setActiveDate(newDateStr);
   };
 
   const inputClass = "w-full px-4 py-3 rounded-xl border dark:bg-slate-900 dark:border-slate-700 text-slate-900 dark:text-white outline-none focus:border-blue-500 transition-colors";
@@ -711,7 +751,7 @@ function WeightTab({ lang, theme, profile, dynamicParams, weights, setWeights, a
               <button type="button" onClick={() => changeDate(-1)} className={`px-4 rounded-xl border hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors ${theme === 'dark' ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-100 border-slate-200 text-slate-900'}`}><ChevronLeft size={20}/></button>
               <div className={`flex-1 flex justify-center items-center rounded-xl border py-2 gap-2 ${theme === 'dark' ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200 focus-within:border-blue-500'}`}>
                 <span className="text-xs text-slate-500 font-bold whitespace-nowrap">{getDayOfWeek(activeDate, lang)}</span>
-                <input type="date" lang={lang === 'en' ? 'en-US' : 'zh-TW'} value={activeDate} onChange={e => setActiveDate(e.target.value)} style={{ colorScheme: theme === 'dark' ? 'dark' : 'light' }} className="bg-transparent text-center font-bold outline-none text-slate-900 dark:text-white w-full" />
+                <input type="date" lang={lang === 'en' ? 'en-US' : 'zh-TW'} value={activeDate} max={getTodayDateStr()} onChange={e => setActiveDate(e.target.value)} style={{ colorScheme: theme === 'dark' ? 'dark' : 'light' }} className="bg-transparent text-center font-bold outline-none text-slate-900 dark:text-white w-full" />
               </div>
               <button type="button" onClick={() => changeDate(1)} className={`px-4 rounded-xl border hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors ${theme === 'dark' ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-100 border-slate-200 text-slate-900'}`}><ChevronRight size={20}/></button>
             </div>
@@ -734,18 +774,20 @@ function WeightTab({ lang, theme, profile, dynamicParams, weights, setWeights, a
           <h3 className="font-bold">{strings.formulaDesc}</h3>
           <button onClick={() => setShowFormula(true)} className="text-blue-500 hover:bg-blue-100 dark:hover:bg-blue-900 p-1 rounded-full transition-colors"><HelpCircle className="w-5 h-5"/></button>
         </div>
-        <div className="grid grid-cols-3 gap-3 text-center">
-          <div className={`p-3 rounded-2xl shadow-sm ${theme === 'dark' ? 'bg-slate-900' : 'bg-white'}`}>
-            <span className="text-xs opacity-60 block">{strings.bmr}</span>
-            <strong className="text-lg">{Math.ceil(bmr)}</strong>
+        <div className="grid grid-cols-2 gap-3 text-center">
+          <div className="flex flex-col gap-3">
+            <div className={`p-3 rounded-2xl shadow-sm flex flex-col justify-center flex-1 ${theme === 'dark' ? 'bg-slate-900' : 'bg-white'}`}>
+              <span className="text-xs opacity-60 block">{strings.bmr}</span>
+              <strong className="text-lg">{Math.ceil(bmr)}</strong>
+            </div>
+            <div className={`p-3 rounded-2xl shadow-sm flex flex-col justify-center flex-1 ${theme === 'dark' ? 'bg-slate-900' : 'bg-white'}`}>
+              <span className="text-xs opacity-60 block">{strings.tdee}</span>
+              <strong className="text-lg text-blue-500">{Math.ceil(tdee)}</strong>
+            </div>
           </div>
-          <div className={`p-3 rounded-2xl shadow-sm ${theme === 'dark' ? 'bg-slate-900' : 'bg-white'}`}>
-            <span className="text-xs opacity-60 block">{strings.tdee}</span>
-            <strong className="text-lg text-blue-500">{Math.ceil(tdee)}</strong>
-          </div>
-          <div className="p-3 rounded-2xl shadow-sm bg-blue-600 text-white">
-            <span className="text-xs opacity-90 block">{strings.targetCal}</span>
-            <strong className="text-xl">{Math.ceil(targetCal)}</strong>
+          <div className="p-4 rounded-2xl shadow-sm bg-blue-600 text-white flex flex-col items-center justify-center">
+            <span className="text-sm opacity-90 block mb-1">{strings.targetCal}</span>
+            <strong className="text-4xl">{Math.ceil(targetCal)}</strong>
           </div>
         </div>
       </div>
@@ -776,6 +818,10 @@ function WeightTab({ lang, theme, profile, dynamicParams, weights, setWeights, a
       <Modal isOpen={showFormula} onClose={() => setShowFormula(false)} title={strings.formulaDesc}>
         <div className="text-sm space-y-2 opacity-90">
           <p>{lang === 'zh' ? '當日熱量目標是根據「上一週的平均體重」來計算，避免每天體重波動影響目標。若是第一週則使用最早紀錄的體重。' : 'Target is based on previous week avg weight.'}</p>
+          <div className="mt-2 text-xs text-slate-600 dark:text-slate-400 space-y-1">
+            <p><strong>BMR</strong>: {strings.bmrDesc}</p>
+            <p><strong>TDEE</strong>: {strings.tdeeDesc}</p>
+          </div>
           <div className={`p-4 mt-4 rounded-xl font-mono text-xs leading-relaxed ${theme === 'dark' ? 'bg-slate-900' : 'bg-slate-100'}`}>
             <div className="text-slate-500 mb-2">{lang === 'zh' ? '使用體重' : 'Weight'}: {wAvg.toFixed(1)} kg | {lang === 'zh' ? '身高' : 'Height'}: {dyn.height} cm</div>
             <div>BMR = {Math.ceil(bmr)} kcal</div>
@@ -812,7 +858,9 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
   const changeDate = (days) => {
     const d = new Date(activeDate);
     d.setDate(d.getDate() + days);
-    setActiveDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+    const newDateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    if (newDateStr > getTodayDateStr()) return; // 防止選擇未來的日期
+    setActiveDate(newDateStr);
   };
 
   const handlePhotoUpload = async (e) => {
@@ -869,7 +917,7 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
         <button onClick={() => changeDate(-1)} className={`p-2 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors ${theme === 'dark' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-900'}`}><ChevronLeft size={20}/></button>
         <div className="flex justify-center items-center gap-2 flex-1">
           <span className="text-xs opacity-60 font-bold whitespace-nowrap">{getDayOfWeek(activeDate, lang)}</span>
-          <input type="date" lang={lang === 'en' ? 'en-US' : 'zh-TW'} value={activeDate} onChange={e => setActiveDate(e.target.value)} style={{ colorScheme: theme === 'dark' ? 'dark' : 'light' }} className="bg-transparent font-bold text-center outline-none text-slate-900 dark:text-white w-full max-w-[150px]" />
+          <input type="date" lang={lang === 'en' ? 'en-US' : 'zh-TW'} value={activeDate} max={getTodayDateStr()} onChange={e => setActiveDate(e.target.value)} style={{ colorScheme: theme === 'dark' ? 'dark' : 'light' }} className="bg-transparent font-bold text-center outline-none text-slate-900 dark:text-white w-full max-w-[150px]" />
         </div>
         <button onClick={() => changeDate(1)} className={`p-2 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors ${theme === 'dark' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-900'}`}><ChevronRight size={20}/></button>
       </div>
@@ -1180,11 +1228,8 @@ function DashboardTab({ lang, setLang, theme, setTheme, profile, setProfile, dyn
           <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
             <label className="block text-sm font-medium mb-2 opacity-80">{strings.settingsTitle}</label>
             <div className="flex gap-2">
-              <button type="button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="flex-1 py-2 bg-slate-100 dark:bg-slate-700 rounded-xl text-sm font-bold hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">
-                {theme === 'dark' ? strings.lightMode : strings.darkMode}
-              </button>
-              <button type="button" onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')} className="flex-1 py-2 bg-slate-100 dark:bg-slate-700 rounded-xl text-sm font-bold hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">
-                {lang === 'zh' ? 'English' : '中文'}
+              <button type="button" onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')} className="w-full py-3 bg-slate-100 dark:bg-slate-700 rounded-xl text-sm font-bold hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">
+                {lang === 'zh' ? '切換為 English' : 'Switch to 中文'}
               </button>
             </div>
           </div>
@@ -1306,6 +1351,40 @@ function BackupImportArea({ weights, meals, setWeights, setMeals, theme, strings
 3. 多圖處理：同一餐多張照片請全轉為 Base64 放入 "photos" 陣列；無圖則留空陣列 []。
 4. 無法確認時：直接忽略無法對應的照片。`;
 
+  const fallbackCopyTextToClipboard = (text) => {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.top = "0";
+    textArea.style.left = "0";
+    textArea.style.position = "fixed";
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    try {
+      document.execCommand('copy');
+      alert(strings.copied);
+      setShowPrompt(false);
+    } catch (err) {
+      console.error('Fallback: Oops, unable to copy', err);
+    }
+    document.body.removeChild(textArea);
+  };
+
+  const handleCopyPrompt = async () => {
+    if (!navigator.clipboard) {
+      fallbackCopyTextToClipboard(promptText);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(promptText);
+      alert(strings.copied);
+      setShowPrompt(false);
+    } catch (err) {
+      console.error('Failed to copy text: ', err);
+      fallbackCopyTextToClipboard(promptText);
+    }
+  };
+
   return (
     <div className={`p-6 rounded-3xl shadow border ${theme === 'dark' ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
       <div className="flex justify-between items-center mb-4">
@@ -1342,12 +1421,15 @@ function BackupImportArea({ weights, meals, setWeights, setMeals, theme, strings
       </div>
 
       <Modal isOpen={showPrompt} onClose={() => setShowPrompt(false)} title={strings.aiPromptTitle}>
-        <p className="text-sm mb-4 opacity-80 leading-relaxed">{strings.aiPromptDesc}</p>
+        <div className="text-sm mb-4 opacity-90 leading-relaxed space-y-2">
+          <p className="font-bold text-green-600 dark:text-green-400">{strings.importHelp1}</p>
+          <p>{strings.importHelp2}</p>
+        </div>
         <div className="flex-1 overflow-y-auto mb-4">
           <textarea readOnly value={promptText} className="w-full h-48 p-3 text-xs font-mono rounded-xl border bg-slate-100 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-300 select-all outline-none focus:border-blue-500" />
         </div>
         <p className="text-xs font-bold text-slate-500 mb-2">{strings.downloadPromptDesc}</p>
-        <button onClick={() => { navigator.clipboard.writeText(promptText); alert(strings.copied); setShowPrompt(false); }} className="w-full py-4 bg-blue-600 text-white font-bold rounded-xl shadow-lg">{strings.copyPrompt}</button>
+        <button onClick={handleCopyPrompt} className="w-full py-4 bg-blue-600 text-white font-bold rounded-xl shadow-lg">{strings.copyPrompt}</button>
       </Modal>
     </div>
   );
