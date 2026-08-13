@@ -1494,6 +1494,45 @@ function EditDynamicArea({ dynamicParams, setDynamicParams, theme, strings, lang
         <button type="submit" className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md transition-colors">{strings.save}</button>
       </form>
       )}
+
+      {isFormOpen && dynamicParams.length > 0 && (
+        <div className="mt-6 pt-6 border-t border-slate-200 dark:border-slate-700 animate-in fade-in">
+          <details className="group">
+            <summary className="text-sm font-bold text-slate-500 cursor-pointer list-none flex items-center gap-2">
+              <span className="group-open:hidden">▶</span>
+              <span className="hidden group-open:inline">▼</span>
+              {lang === 'zh' ? '進階：管理歷史紀錄' : 'Advanced: Manage History'}
+            </summary>
+            <div className="mt-4 space-y-2">
+              <div className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 p-3 rounded-lg text-xs leading-relaxed font-bold mb-4">
+                {lang === 'zh' ? '警告：刪除或修改過去的紀錄將會改變當時的 BMR 與熱量目標，進而影響歷史達標紀錄！請謹慎操作。' : 'WARNING: Modifying past records will recalculate past BMR and targets, which may alter historical achievement streaks! Proceed with caution.'}
+              </div>
+              {dynamicParams.map((param, idx) => (
+                <div key={param.effectiveDate} className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-900/50 rounded-lg border border-slate-100 dark:border-slate-800">
+                  <div className="flex flex-col">
+                    <span className="text-sm font-bold">{param.effectiveDate}</span>
+                    <span className="text-xs text-slate-500">{param.height}cm, {param.deficit}kcal, {param.activity}x</span>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      if(dynamicParams.length === 1) {
+                        alert(lang === 'zh' ? '必須保留至少一筆動態目標設定！' : 'Must keep at least one record!');
+                        return;
+                      }
+                      if(confirm(lang === 'zh' ? `確定要刪除 ${param.effectiveDate} 的設定嗎？` : `Delete ${param.effectiveDate}?`)) {
+                        setDynamicParams(prev => prev.filter(p => p.effectiveDate !== param.effectiveDate));
+                      }
+                    }}
+                    className="p-2 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors"
+                  >
+                    <Trash2 size={16}/>
+                  </button>
+                </div>
+              ))}
+            </div>
+          </details>
+        </div>
+      )}
       
       {activeInfo && <DynamicInfoModal type={activeInfo} onClose={() => setActiveInfo(null)} strings={strings} />}
     </div>
