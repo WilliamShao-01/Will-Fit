@@ -4,10 +4,13 @@ import {
 } from 'recharts';
 import { 
   Scale, Utensils, Settings, ChevronLeft, ChevronRight, ChevronUp,
-  HelpCircle, AlertTriangle, X, Plus, ExternalLink, Download, Upload, FileText, Camera, Trash2
+  HelpCircle, AlertTriangle, X, Plus, ExternalLink, Download, Upload, FileText, Camera, Trash2, LogOut
 } from 'lucide-react';
 import heic2any from 'heic2any';
 import imageCompression from 'browser-image-compression';
+import { onAuthStateChanged, signInWithPopup } from 'firebase/auth';
+import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
+import { auth, db, googleProvider, CLOUDINARY_CLOUD_NAME, CLOUDINARY_UPLOAD_PRESET } from './config';
 
 const t = {
   zh: {
@@ -261,6 +264,32 @@ const getEffectiveWeight = (targetDateStr, weightsList) => {
 
 
 export default function App() {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      setUser(currentUser);
+      if (currentUser) {
+        try {
+          const userDocRef = doc(db, 'users', currentUser.uid);
+          const userSnap = await getDoc(userDocRef);
+          if (userSnap.exists()) {
+            const data = userSnap.data();
+            if (data.profile) setProfile(data.profile);
+            if (data.dynamicParams) setDynamicParams(data.dynamicParams);
+            if (data.weights) setWeights(data.weights);
+            if (data.meals) setMeals(data.meals);
+          }
+        } catch (error) {
+          console.error("Error fetching user data:", error);
+        }
+      }
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
   const [profile, setProfile] = useState(() => {
     const saved = localStorage.getItem('willfit_profile');
     return saved ? JSON.parse(saved) : null;
@@ -298,6 +327,7 @@ export default function App() {
   
   const [isDangerActive, setIsDangerActive] = useState(false);
   const [isDangerFlashing, setIsDangerFlashing] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   useEffect(() => { localStorage.setItem('willfit_profile', JSON.stringify(profile)); }, [profile]);
   useEffect(() => { localStorage.setItem('willfit_dynamicParams', JSON.stringify(dynamicParams)); }, [dynamicParams]);
@@ -443,6 +473,59 @@ export default function App() {
   const todayTargetCal = Math.round(todayBmr * (todayDyn?.activity || 1.2) - (todayDyn?.deficit || 300));
   const todayRemainingCal = todayTargetCal - todayTotalCal;
 
+  if (loading) {
+    return <div className="min-h-screen flex items-center justify-center font-bold">Loading...</div>;
+  }
+
+  if (!user) {
+    return (
+      <div className={`min-h-screen flex flex-col items-center justify-center p-4 transition-colors duration-300 ${theme === 'dark' ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-900'}`}>
+        <div className="w-20 h-20 bg-blue-600 rounded-3xl flex items-center justify-center mb-6 shadow-xl shadow-blue-500/30">
+          <Scale className="text-white" size={40} />
+        </div>
+        <h1 className="text-3xl font-bold mb-2">Will Fit</h1>
+        <p className="opacity-60 mb-12 text-center">{lang === 'zh' ? '雲端同步版・開始健康之旅' : 'Cloud Sync Edition'}</p>
+        
+        <button 
+          onClick={() => {
+            signInWithPopup(auth, googleProvider).catch(err => {
+              console.error("登入錯誤:", err);
+              alert("登入失敗：" + err.message);
+            });
+          }}
+          className={`flex items-center gap-4 px-6 py-4 rounded-2xl shadow border font-bold text-lg active:scale-95 transition-all ${theme === 'dark' ? 'bg-slate-800 border-slate-700 hover:bg-slate-700' : 'bg-white border-slate-200 hover:bg-slate-50'}`}
+        >
+          <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-8 h-8 bg-white rounded-full" />
+          {lang === 'zh' ? '使用 Google 帳號登入' : 'Sign in with Google'}
+        </button>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return <div className="min-h-screen flex items-center justify-center font-bold">Loading...</div>;
+  }
+
+  if (!user) {
+    return (
+      <div className={`min-h-screen flex flex-col items-center justify-center p-4 transition-colors duration-300 ${theme === 'dark' ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-900'}`}>
+        <div className="w-20 h-20 bg-blue-600 rounded-3xl flex items-center justify-center mb-6 shadow-xl shadow-blue-500/30">
+          <Scale className="text-white" size={40} />
+        </div>
+        <h1 className="text-3xl font-bold mb-2">Will Fit</h1>
+        <p className="opacity-60 mb-12 text-center">{lang === 'zh' ? '雲端同步版・開始健康之旅' : 'Cloud Sync Edition'}</p>
+        
+        <button 
+          onClick={() => signInWithPopup(auth, googleProvider)}
+          className={`flex items-center gap-4 px-6 py-4 rounded-2xl shadow border font-bold text-lg active:scale-95 transition-all ${theme === 'dark' ? 'bg-slate-800 border-slate-700 hover:bg-slate-700' : 'bg-white border-slate-200 hover:bg-slate-50'}`}
+        >
+          <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-8 h-8 bg-white rounded-full" />
+          {lang === 'zh' ? '使用 Google 帳號登入' : 'Sign in with Google'}
+        </button>
+      </div>
+    );
+  }
+
   if (!profile || dynamicParams.length === 0) {
     return <Onboarding profile={profile} setProfile={setProfile} setDynamicParams={setDynamicParams} lang={lang} setLang={setLang} strings={strings} />;
   }
@@ -483,9 +566,26 @@ export default function App() {
                   <div className={`absolute right-0 mt-2 w-52 rounded-2xl shadow-xl border z-50 overflow-hidden ${theme === 'dark' ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'}`}>
                     <div className="p-2 border-b text-[10px] font-bold opacity-60 px-4 uppercase tracking-wider">{strings.settingsTitle}</div>
                     <button onClick={() => { setIsSettingsOpen(false); setCurrentTab('dashboard'); setDashboardScrollTarget('profile'); }} className="w-full text-left px-4 py-3 text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-700 border-b border-slate-100 dark:border-slate-700 transition-colors">{strings.editProfile}</button>
-                    <button onClick={() => { setIsSettingsOpen(false); setCurrentTab('dashboard'); setDashboardScrollTarget('backup'); }} className="w-full text-left px-4 py-3 text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-700 border-b border-slate-100 dark:border-slate-700 transition-colors">{strings.backupImport}</button>
-                    <button onClick={() => { setIsSettingsOpen(false); setCurrentTab('dashboard'); setDashboardScrollTarget('recent'); }} className="w-full text-left px-4 py-3 text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">{strings.recentRecords}</button>
+                    <button onClick={() => { setIsSettingsOpen(false); setCurrentTab('dashboard'); setDashboardScrollTarget('dynamic'); }} className="w-full text-left px-4 py-3 text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-700 border-b border-slate-100 dark:border-slate-700 transition-colors">{strings.editDynamic}</button>
+                    <button onClick={() => { setIsSettingsOpen(false); setCurrentTab('dashboard'); setDashboardScrollTarget('recent'); }} className="w-full text-left px-4 py-3 text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-700 border-b border-slate-100 dark:border-slate-700 transition-colors">{strings.recentRecords}</button>
+                    <button onClick={() => { setIsSettingsOpen(false); setCurrentTab('dashboard'); setDashboardScrollTarget('backup'); }} className="w-full text-left px-4 py-3 text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">{strings.backupImport}</button>
                     <div className="h-2 bg-slate-100 dark:bg-slate-900 border-y border-slate-200 dark:border-slate-700"></div>
+                    <button onClick={async () => {
+                      setIsLoggingOut(true);
+                      try {
+                        if (user) {
+                          await setDoc(doc(db, 'users', user.uid), { profile, dynamicParams, weights, meals, lastUpdated: new Date().toISOString() }, { merge: true });
+                        }
+                      } catch (e) {
+                        console.error("Force save on logout failed:", e);
+                        alert(lang === 'zh' ? '登出前儲存失敗，請檢查連線或資料大小。' : 'Failed to save data before logout.');
+                      }
+                      auth.signOut();
+                      setIsLoggingOut(false);
+                      setIsSettingsOpen(false);
+                    }} disabled={isLoggingOut} className="w-full text-left px-4 py-3 text-sm font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors flex items-center gap-2">
+                      <LogOut size={16}/> {isLoggingOut ? (lang === 'zh' ? '儲存並登出中...' : 'Saving & Logging out...') : (lang === 'zh' ? '登出 (Logout)' : 'Logout')}
+                    </button>
                     <button onClick={() => { setIsSettingsOpen(false); setActiveModal('deleteConfirm'); }} className="w-full text-left px-4 py-3 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 font-bold transition-colors">{strings.deleteAllData}</button>
                   </div>
                 </>
@@ -505,7 +605,7 @@ export default function App() {
       <main className="max-w-4xl mx-auto px-4 pt-4 pb-28">
         {currentTab === 'weight' && <WeightTab lang={lang} theme={theme} profile={profile} dynamicParams={dynamicParams} weights={weights} setWeights={setWeights} activeDate={activeDate} setActiveDate={setActiveDate} strings={strings} />}
         {currentTab === 'diet' && <DietTab lang={lang} theme={theme} profile={profile} dynamicParams={dynamicParams} weights={weights} meals={meals} setMeals={setMeals} activeDate={activeDate} setActiveDate={setActiveDate} strings={strings} />}
-        {currentTab === 'dashboard' && <DashboardTab lang={lang} setLang={setLang} theme={theme} setTheme={setTheme} profile={profile} setProfile={setProfile} dynamicParams={dynamicParams} setDynamicParams={setDynamicParams} weights={weights} setWeights={setWeights} meals={meals} setMeals={setMeals} streakData={streakData} scrollTarget={dashboardScrollTarget} setScrollTarget={setDashboardScrollTarget} setCurrentTab={setCurrentTab} setActiveDate={setActiveDate} strings={strings} />}
+        {currentTab === 'dashboard' && <DashboardTab user={user} lang={lang} setLang={setLang} theme={theme} setTheme={setTheme} profile={profile} setProfile={setProfile} dynamicParams={dynamicParams} setDynamicParams={setDynamicParams} weights={weights} setWeights={setWeights} meals={meals} setMeals={setMeals} streakData={streakData} scrollTarget={dashboardScrollTarget} setScrollTarget={setDashboardScrollTarget} setCurrentTab={setCurrentTab} setActiveDate={setActiveDate} strings={strings} />}
       </main>
 
       <nav className={`fixed bottom-0 w-full z-40 border-t shadow-lg backdrop-blur-md pb-safe ${theme === 'dark' ? 'bg-slate-800/90 border-slate-700 text-slate-300' : 'bg-white/90 border-slate-200 text-slate-600'}`}>
@@ -520,7 +620,20 @@ export default function App() {
         <div className="space-y-4">
           <p className="text-sm opacity-80 mb-6">{strings.deleteConfirmDesc}</p>
           <div className="flex flex-col gap-3">
-            <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="w-full py-4 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl shadow-lg transition-colors">{strings.confirmDelete}</button>
+            <button onClick={async () => { 
+              if (user) {
+                try {
+                  const { deleteDoc, doc } = await import('firebase/firestore');
+                  await deleteDoc(doc(db, 'users', user.uid));
+                } catch (e) { console.error(e); }
+              }
+              localStorage.clear();
+              setProfile(null);
+              setDynamicParams([]);
+              setWeights([]);
+              setMeals([]);
+              setActiveModal(null);
+            }} className="w-full py-4 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl shadow-lg transition-colors">{strings.confirmDelete}</button>
             <button onClick={() => { setActiveModal(null); setCurrentTab('dashboard'); setDashboardScrollTarget('backup'); }} className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md transition-colors">{strings.backupImport}</button>
             <button onClick={() => { setActiveModal(null); setCurrentTab('dashboard'); }} className="w-full py-3 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 font-bold rounded-xl transition-colors">{strings.backToRecords}</button>
           </div>
@@ -867,18 +980,30 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
         }
         
         const compressedFile = await imageCompression(processedFile, {
-          maxWidthOrHeight: 600,
+          maxWidthOrHeight: 800,
           useWebWorker: true,
-          initialQuality: 0.7
+          initialQuality: 0.8
         });
         
-        return await imageCompression.getDataUrlFromFile(compressedFile);
+        const formData = new FormData();
+        formData.append('file', compressedFile);
+        formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+        
+        const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`, {
+          method: 'POST',
+          body: formData
+        });
+        
+        if (!res.ok) throw new Error("Cloudinary upload failed");
+        
+        const data = await res.json();
+        return data.secure_url;
       }));
 
       setPhotos(prev => [...prev, ...newPhotos]);
     } catch (error) {
       console.error("Photo upload error:", error);
-      alert(lang === 'zh' ? '圖片處理失敗，請確保圖片格式正確並重試。' : 'Failed to process image, please check the format and try again.');
+      alert(lang === 'zh' ? '圖片上傳失敗，請確保網路正常並重試。' : 'Upload failed, please check network and try again.');
     } finally {
       e.target.value = '';
     }
@@ -915,7 +1040,7 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2">
       
-      <div className={`p-2 rounded-2xl shadow border flex items-center justify-between ${theme === 'dark' ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
+      <div className={`sticky top-[68px] z-30 p-2 rounded-2xl shadow border flex items-center justify-between backdrop-blur-md ${theme === 'dark' ? 'bg-slate-800/90 border-slate-700 text-white' : 'bg-white/90 border-slate-200 text-slate-900'}`}>
         <button onClick={() => changeDate(-1)} className={`p-2 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors ${theme === 'dark' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-900'}`}><ChevronLeft size={20}/></button>
         <div className="flex justify-center items-center gap-2 flex-1">
           <span className="text-xs opacity-60 font-bold whitespace-nowrap">{getDayOfWeek(activeDate, lang)}</span>
@@ -954,23 +1079,23 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
         
         {(isFormOpen || editingMealId) && (
         <form onSubmit={handleMealSubmit} className="space-y-4 mt-4 animate-in fade-in slide-in-from-top-2">
-          <div className="flex gap-3">
-            <div className="w-1/3">
-              <label className="block text-xs font-bold mb-1 text-slate-500">{strings.mealTime}</label>
-              <input type="time" lang={lang === 'en' ? 'en-US' : 'zh-TW'} value={mealTime} onChange={e => setMealTime(e.target.value)} required style={{ colorScheme: theme === 'dark' ? 'dark' : 'light' }} className={`${inputClass} bg-transparent text-slate-900 dark:text-white`} />
-            </div>
-            <div className="w-2/3">
-              <label className="block text-xs font-bold mb-1 text-slate-500">{strings.mealCal}</label>
-              <div className="flex gap-2 w-full">
-                <button type="button" onClick={() => setMealCal(Math.max(0,Number(mealCal||0)-50))} className="px-3 bg-slate-200 dark:bg-slate-700 rounded-xl text-lg font-bold hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors shrink-0 text-slate-900 dark:text-white">-</button>
-                <input type="number" step="10" value={mealCal} onChange={e => setMealCal(e.target.value)} required className={`${inputClass} text-center font-bold flex-1 min-w-0 bg-transparent text-slate-900 dark:text-white`} placeholder="450" />
-                <button type="button" onClick={() => setMealCal(Number(mealCal||0)+50)} className="px-3 bg-slate-200 dark:bg-slate-700 rounded-xl text-lg font-bold hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors shrink-0 text-slate-900 dark:text-white">+</button>
-              </div>
-            </div>
-          </div>
           <div>
             <label className="block text-xs font-bold mb-1 text-slate-500">{strings.mealName}</label>
             <input type="text" value={mealName} onChange={e => setMealName(e.target.value)} required className={`${inputClass} bg-transparent text-slate-900 dark:text-white`} placeholder={lang === 'zh' ? '例如: 排骨便當' : 'e.g. Chicken Salad'} />
+          </div>
+          <div className="flex gap-3">
+            <div className="w-1/2">
+              <label className="block text-xs font-bold mb-1 text-slate-500">{strings.mealTime}</label>
+              <input type="time" lang="en-GB" value={mealTime} onChange={e => setMealTime(e.target.value)} required style={{ colorScheme: theme === 'dark' ? 'dark' : 'light' }} className={`${inputClass} bg-transparent text-slate-900 dark:text-white`} />
+            </div>
+            <div className="w-1/2">
+              <label className="block text-xs font-bold mb-1 text-slate-500">{strings.mealCal}</label>
+              <div className="flex gap-2 w-full">
+                <button type="button" onClick={() => setMealCal(Math.max(0,Number(mealCal||0)-50))} className="px-3 bg-slate-200 dark:bg-slate-700 rounded-xl text-lg font-bold hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors shrink-0 text-slate-900 dark:text-white">-</button>
+                <input type="number" step="10" value={mealCal} onChange={e => setMealCal(e.target.value)} required className={`${inputClass} text-center font-bold flex-1 min-w-0 bg-transparent text-slate-900 dark:text-white px-1`} placeholder="450" />
+                <button type="button" onClick={() => setMealCal(Number(mealCal||0)+50)} className="px-3 bg-slate-200 dark:bg-slate-700 rounded-xl text-lg font-bold hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors shrink-0 text-slate-900 dark:text-white">+</button>
+              </div>
+            </div>
           </div>
           <div>
             <label className="block text-xs font-bold mb-2 text-slate-500">{strings.photos}</label>
@@ -1047,13 +1172,19 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
 // ----------------------------------------------------------------------
 // Dashboard Tab
 // ----------------------------------------------------------------------
-function DashboardTab({ lang, setLang, theme, setTheme, profile, setProfile, dynamicParams, setDynamicParams, weights, setWeights, meals, setMeals, streakData, scrollTarget, setScrollTarget, setCurrentTab, setActiveDate, strings }) {
+function DashboardTab({ user, lang, setLang, theme, setTheme, profile, setProfile, dynamicParams, setDynamicParams, weights, setWeights, meals, setMeals, streakData, scrollTarget, setScrollTarget, setCurrentTab, setActiveDate, strings }) {
   const basicInfoRef = useRef(null);
   const dynamicParamsRef = useRef(null);
   const backupRef = useRef(null);
   const recentRecordsRef = useRef(null);
   const [showEditProfileModal, setShowEditProfileModal] = useState(false);
   const [editProfileForm, setEditProfileForm] = useState({ name: profile.name, gender: profile.gender, birthYear: profile.birthYear });
+
+  useEffect(() => {
+    if (profile) {
+      setEditProfileForm({ name: profile.name, gender: profile.gender, birthYear: profile.birthYear });
+    }
+  }, [profile]);
 
   useEffect(() => {
     if (scrollTarget) {
@@ -1117,6 +1248,7 @@ function DashboardTab({ lang, setLang, theme, setTheme, profile, setProfile, dyn
           <div>
             <h2 className="text-2xl font-bold">{profile.name}</h2>
             <p className="text-sm opacity-80 mt-1">{profile.gender === 'male' ? strings.male : strings.female} • {new Date().getFullYear() - profile.birthYear} yrs</p>
+            {user && <p className="text-xs opacity-60 mt-1">{user.email}</p>}
           </div>
           <button onClick={() => setShowEditProfileModal(true)} className="px-4 py-2 bg-white/20 hover:bg-white/30 rounded-xl text-sm font-bold transition-colors">{strings.editProfile}</button>
         </div>
@@ -1202,7 +1334,7 @@ function DashboardTab({ lang, setLang, theme, setTheme, profile, setProfile, dyn
       </div>
 
       <div ref={backupRef}>
-         <BackupImportArea weights={weights} meals={meals} setWeights={setWeights} setMeals={setMeals} theme={theme} strings={strings} lang={lang} getTodayDateStr={getTodayDateStr} />
+         <BackupImportArea profile={profile} setProfile={setProfile} dynamicParams={dynamicParams} setDynamicParams={setDynamicParams} weights={weights} meals={meals} setWeights={setWeights} setMeals={setMeals} theme={theme} strings={strings} lang={lang} getTodayDateStr={getTodayDateStr} />
       </div>
 
       <Modal isOpen={showEditProfileModal} onClose={() => setShowEditProfileModal(false)} title={strings.editProfile}>
@@ -1254,6 +1386,15 @@ function EditDynamicArea({ dynamicParams, setDynamicParams, theme, strings, lang
   const [activity, setActivity] = useState(dynamicParams[0]?.activity || 1.2);
   const [activeInfo, setActiveInfo] = useState(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
+
+  useEffect(() => {
+    if (dynamicParams && dynamicParams.length > 0) {
+      const latest = dynamicParams[0];
+      setHeight(latest.height);
+      setDeficit(latest.deficit);
+      setActivity(latest.activity);
+    }
+  }, [dynamicParams]);
 
   const handleSave = (e) => {
     e.preventDefault();
@@ -1327,12 +1468,21 @@ function EditDynamicArea({ dynamicParams, setDynamicParams, theme, strings, lang
 // ----------------------------------------------------------------------
 // Backup Import Area Component
 // ----------------------------------------------------------------------
-function BackupImportArea({ weights, meals, setWeights, setMeals, theme, strings, lang, getTodayDateStr }) {
+function BackupImportArea({ profile, setProfile, dynamicParams, setDynamicParams, weights, meals, setWeights, setMeals, theme, strings, lang, getTodayDateStr }) {
   const [showPrompt, setShowPrompt] = useState(false);
-  const promptText = `我有一份從其他 APP 匯出的飲食與體重紀錄（包含圖片與表格數據）。請幫我過濾掉無關資訊（如心率、步數、睡眠等），並將所有內容嚴格轉換為符合以下 JSON 格式。請直接輸出一個 .json 檔案讓我下載，不要包含任何 Markdown 說明文字或額外的解釋：
+  const [isImporting, setIsImporting] = useState(false);
+  const promptText = `我有一份從其他 APP 匯出的飲食與體重紀錄（包含圖片與表格數據），以及我的個人基本資料。請幫我過濾掉無關資訊（如心率、步數、睡眠等），並將所有內容嚴格轉換為符合以下 JSON 格式。請直接輸出一個 .json 檔案讓我下載，不要包含任何 Markdown 說明文字或額外的解釋：
 
 【輸出 JSON 結構規範】
 {
+  "profile": {
+    "name": "你的名字",
+    "gender": "male", // male 或 female
+    "birthYear": 1990
+  },
+  "dynamicParams": [
+    { "effectiveDate": "YYYY-MM-DD", "height": 170, "deficit": 300, "activity": 1.2 }
+  ],
   "weights": [
     { "date": "YYYY-MM-DD", "weight": 75.5 }
   ],
@@ -1395,7 +1545,7 @@ function BackupImportArea({ weights, meals, setWeights, setMeals, theme, strings
       </div>
       <div className="grid grid-cols-2 gap-4">
         <button onClick={() => {
-          const blob = new Blob([JSON.stringify({ weights, meals })], { type: 'application/json' });
+          const blob = new Blob([JSON.stringify({ profile, dynamicParams, weights, meals }, null, 2)], { type: 'application/json' });
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a'); a.href = url; a.download = `WillFit_Backup_${getTodayDateStr()}.json`; a.click();
         }} className="flex flex-col items-center p-4 bg-slate-100 dark:bg-slate-900 rounded-xl hover:shadow-md transition-shadow text-blue-600">
@@ -1405,17 +1555,50 @@ function BackupImportArea({ weights, meals, setWeights, setMeals, theme, strings
         
         <label className="flex flex-col items-center p-4 bg-slate-100 dark:bg-slate-900 rounded-xl hover:shadow-md transition-shadow text-slate-600 dark:text-slate-300 cursor-pointer">
           <Upload size={24} className="mb-2" />
-          <span className="text-sm font-bold">{strings.importCsv}</span>
-          <input type="file" accept=".json" className="hidden" onChange={e => {
+          <span className="text-sm font-bold">{isImporting ? (lang === 'zh' ? '處理圖片中...' : 'Processing...') : strings.importCsv}</span>
+          <input type="file" accept=".json" className="hidden" disabled={isImporting} onChange={e => {
             const file = e.target.files[0]; if (!file) return;
             const reader = new FileReader();
-            reader.onload = ev => {
+            reader.onload = async ev => {
               try {
+                setIsImporting(true);
                 const data = JSON.parse(ev.target.result);
+                
+                // Convert Base64 images to Cloudinary URLs
+                if (data.meals && Array.isArray(data.meals)) {
+                  for (let i = 0; i < data.meals.length; i++) {
+                    const meal = data.meals[i];
+                    if (meal.photos && Array.isArray(meal.photos)) {
+                      for (let j = 0; j < meal.photos.length; j++) {
+                        const photo = meal.photos[j];
+                        if (typeof photo === 'string' && photo.startsWith('data:image/')) {
+                          const formData = new FormData();
+                          formData.append('file', photo);
+                          formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+                          const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`, {
+                            method: 'POST', body: formData
+                          });
+                          if (res.ok) {
+                            const cloudData = await res.json();
+                            meal.photos[j] = cloudData.secure_url;
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+
+                if (data.profile) setProfile(data.profile);
+                if (data.dynamicParams) setDynamicParams(data.dynamicParams);
                 if (data.weights) setWeights(data.weights);
                 if (data.meals) setMeals(data.meals);
                 alert(strings.importSuccess); 
-              } catch { alert(strings.importError); }
+              } catch (err) { 
+                console.error(err);
+                alert(strings.importError); 
+              } finally {
+                setIsImporting(false);
+              }
             };
             reader.readAsText(file);
           }}/>
