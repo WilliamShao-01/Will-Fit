@@ -6,6 +6,7 @@ import {
   Scale, Utensils, Settings, ChevronLeft, ChevronRight, ChevronUp,
   HelpCircle, AlertTriangle, X, Plus, ExternalLink, Download, Upload, FileText, Camera, Trash2
 } from 'lucide-react';
+import heic2any from 'heic2any';
 
 const t = {
   zh: {
@@ -258,22 +259,27 @@ const getEffectiveWeight = (targetDateStr, weightsList) => {
 };
 
 const resizeImage = (dataUrl, maxWidth = 600) => {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const img = new Image();
     img.src = dataUrl;
     img.onload = () => {
-      const canvas = document.createElement('canvas');
-      const ratio = maxWidth / img.width;
-      if (ratio >= 1) {
-        resolve(dataUrl); 
-        return;
+      try {
+        const canvas = document.createElement('canvas');
+        const ratio = maxWidth / img.width;
+        if (ratio >= 1) {
+          resolve(dataUrl); 
+          return;
+        }
+        canvas.width = maxWidth;
+        canvas.height = img.height * ratio;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.7));
+      } catch (err) {
+        reject(err);
       }
-      canvas.width = maxWidth;
-      canvas.height = img.height * ratio;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      resolve(canvas.toDataURL('image/jpeg', 0.7));
     };
+    img.onerror = () => reject(new Error('Image load failed'));
   });
 };
 
@@ -864,22 +870,46 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
   };
 
   const handlePhotoUpload = async (e) => {
-    const files = Array.from(e.target.files);
-    if (files.length === 0) return;
-    
-    const newPhotos = await Promise.all(files.map(file => {
-      return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = async (event) => {
-          const resized = await resizeImage(event.target.result, 600);
-          resolve(resized);
-        };
-        reader.readAsDataURL(file);
-      });
-    }));
+    try {
+      const files = Array.from(e.target.files);
+      if (files.length === 0) return;
+      
+      const newPhotos = await Promise.all(files.map(async (file) => {
+        let processedFile = file;
+        
+        // Convert HEIC/HEIF to JPEG
+        if (file.name.toLowerCase().endsWith('.heic') || file.name.toLowerCase().endsWith('.heif') || file.type === 'image/heic' || file.type === 'image/heif') {
+          try {
+            const convertedBlob = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.7 });
+            processedFile = Array.isArray(convertedBlob) ? convertedBlob[0] : convertedBlob;
+          } catch (err) {
+            console.error("HEIC conversion error:", err);
+            throw new Error("HEIC conversion failed");
+          }
+        }
+        
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = async (event) => {
+            try {
+              const resized = await resizeImage(event.target.result, 600);
+              resolve(resized);
+            } catch (err) {
+              reject(err);
+            }
+          };
+          reader.onerror = () => reject(new Error("File read error"));
+          reader.readAsDataURL(processedFile);
+        });
+      }));
 
-    setPhotos(prev => [...prev, ...newPhotos]);
-    e.target.value = '';
+      setPhotos(prev => [...prev, ...newPhotos]);
+    } catch (error) {
+      console.error("Photo upload error:", error);
+      alert(lang === 'zh' ? '圖片處理失敗，請確保圖片格式正確並重試。' : 'Failed to process image, please check the format and try again.');
+    } finally {
+      e.target.value = '';
+    }
   };
 
   const handleMealSubmit = (e) => {
