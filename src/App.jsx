@@ -266,6 +266,9 @@ const getEffectiveWeight = (targetDateStr, weightsList) => {
 export default function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [showCloudPromo, setShowCloudPromo] = useState(() => {
+    return localStorage.getItem('willfit_cloud_promo_dismissed') !== 'true';
+  });
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -280,6 +283,22 @@ export default function App() {
             if (data.dynamicParams) setDynamicParams(data.dynamicParams);
             if (data.weights) setWeights(data.weights);
             if (data.meals) setMeals(data.meals);
+          } else {
+            // First time login: Upload local data to cloud
+            const localProfile = JSON.parse(localStorage.getItem('willfit_profile') || 'null');
+            const localDynamic = JSON.parse(localStorage.getItem('willfit_dynamicParams') || '[]');
+            const localWeights = JSON.parse(localStorage.getItem('willfit_weights') || '[]');
+            const localMeals = JSON.parse(localStorage.getItem('willfit_meals') || '[]');
+            
+            if (localProfile) {
+              await setDoc(userDocRef, {
+                profile: localProfile,
+                dynamicParams: localDynamic,
+                weights: localWeights,
+                meals: localMeals,
+                lastUpdated: new Date().toISOString()
+              });
+            }
           }
         } catch (error) {
           console.error("Error fetching user data:", error);
@@ -502,29 +521,7 @@ export default function App() {
     );
   }
 
-  if (loading) {
-    return <div className="min-h-screen flex items-center justify-center font-bold">Loading...</div>;
-  }
 
-  if (!user) {
-    return (
-      <div className={`min-h-screen flex flex-col items-center justify-center p-4 transition-colors duration-300 ${theme === 'dark' ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-900'}`}>
-        <div className="w-20 h-20 bg-blue-600 rounded-3xl flex items-center justify-center mb-6 shadow-xl shadow-blue-500/30">
-          <Scale className="text-white" size={40} />
-        </div>
-        <h1 className="text-3xl font-bold mb-2">Will Fit</h1>
-        <p className="opacity-60 mb-12 text-center">{lang === 'zh' ? '雲端同步版・開始健康之旅' : 'Cloud Sync Edition'}</p>
-        
-        <button 
-          onClick={() => signInWithPopup(auth, googleProvider)}
-          className={`flex items-center gap-4 px-6 py-4 rounded-2xl shadow border font-bold text-lg active:scale-95 transition-all ${theme === 'dark' ? 'bg-slate-800 border-slate-700 hover:bg-slate-700' : 'bg-white border-slate-200 hover:bg-slate-50'}`}
-        >
-          <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-8 h-8 bg-white rounded-full" />
-          {lang === 'zh' ? '使用 Google 帳號登入' : 'Sign in with Google'}
-        </button>
-      </div>
-    );
-  }
 
   if (!profile || dynamicParams.length === 0) {
     return <Onboarding profile={profile} setProfile={setProfile} setDynamicParams={setDynamicParams} lang={lang} setLang={setLang} strings={strings} />;
@@ -570,22 +567,32 @@ export default function App() {
                     <button onClick={() => { setIsSettingsOpen(false); setCurrentTab('dashboard'); setDashboardScrollTarget('recent'); }} className="w-full text-left px-4 py-3 text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-700 border-b border-slate-100 dark:border-slate-700 transition-colors">{strings.recentRecords}</button>
                     <button onClick={() => { setIsSettingsOpen(false); setCurrentTab('dashboard'); setDashboardScrollTarget('backup'); }} className="w-full text-left px-4 py-3 text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">{strings.backupImport}</button>
                     <div className="h-2 bg-slate-100 dark:bg-slate-900 border-y border-slate-200 dark:border-slate-700"></div>
-                    <button onClick={async () => {
-                      setIsLoggingOut(true);
-                      try {
-                        if (user) {
+                    {user ? (
+                      <button onClick={async () => {
+                        setIsLoggingOut(true);
+                        try {
                           await setDoc(doc(db, 'users', user.uid), { profile, dynamicParams, weights, meals, lastUpdated: new Date().toISOString() }, { merge: true });
+                        } catch (e) {
+                          console.error("Force save on logout failed:", e);
+                          alert(lang === 'zh' ? '登出前儲存失敗，請檢查連線或資料大小。' : 'Failed to save data before logout.');
                         }
-                      } catch (e) {
-                        console.error("Force save on logout failed:", e);
-                        alert(lang === 'zh' ? '登出前儲存失敗，請檢查連線或資料大小。' : 'Failed to save data before logout.');
-                      }
-                      auth.signOut();
-                      setIsLoggingOut(false);
-                      setIsSettingsOpen(false);
-                    }} disabled={isLoggingOut} className="w-full text-left px-4 py-3 text-sm font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors flex items-center gap-2">
-                      <LogOut size={16}/> {isLoggingOut ? (lang === 'zh' ? '儲存並登出中...' : 'Saving & Logging out...') : (lang === 'zh' ? '登出 (Logout)' : 'Logout')}
-                    </button>
+                        auth.signOut();
+                        setIsLoggingOut(false);
+                        setIsSettingsOpen(false);
+                      }} disabled={isLoggingOut} className="w-full text-left px-4 py-3 text-sm font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors flex items-center gap-2">
+                        <LogOut size={16}/> {isLoggingOut ? (lang === 'zh' ? '儲存並登出中...' : 'Saving & Logging out...') : (lang === 'zh' ? '登出 (Logout)' : 'Logout')}
+                      </button>
+                    ) : (
+                      <button onClick={() => {
+                        setIsSettingsOpen(false);
+                        signInWithPopup(auth, googleProvider).catch(err => {
+                          console.error("Login error:", err);
+                          alert(lang === 'zh' ? '登入失敗：' + err.message : 'Login failed: ' + err.message);
+                        });
+                      }} className="w-full text-left px-4 py-3 text-sm font-bold text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors flex items-center gap-2">
+                        <Upload size={16}/> {lang === 'zh' ? '登入 Google 備份至雲端' : 'Login to Cloud Sync'}
+                      </button>
+                    )}
                     <button onClick={() => { setIsSettingsOpen(false); setActiveModal('deleteConfirm'); }} className="w-full text-left px-4 py-3 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 font-bold transition-colors">{strings.deleteAllData}</button>
                   </div>
                 </>
@@ -615,6 +622,34 @@ export default function App() {
           <button onClick={() => setCurrentTab('dashboard')} className={`flex flex-col items-center space-y-1 ${currentTab === 'dashboard' ? 'text-blue-500 font-bold scale-110' : ''} transition-all`}><FileText className="w-5 h-5" /><span className="text-[10px]">{strings.dashboardTab}</span></button>
         </div>
       </nav>
+
+      <Modal isOpen={showCloudPromo && !user} onClose={() => { setShowCloudPromo(false); localStorage.setItem('willfit_cloud_promo_dismissed', 'true'); }} title={lang === 'zh' ? '🎉 新功能上線：雲端自動同步！' : '🎉 New Feature: Cloud Sync!'}>
+        <div className="space-y-4">
+          <p className="text-sm opacity-90 leading-relaxed">
+            {lang === 'zh' 
+              ? '現在你可以綁定 Google 帳號，所有的飲食與體重紀錄都會自動備份到雲端，換手機也不怕資料遺失囉！'
+              : 'You can now link your Google account to automatically backup all your diet and weight records to the cloud. Never lose your data again!'}
+          </p>
+          <div className="flex flex-col gap-3 pt-2">
+            <button onClick={() => {
+              setShowCloudPromo(false);
+              localStorage.setItem('willfit_cloud_promo_dismissed', 'true');
+              signInWithPopup(auth, googleProvider).catch(err => {
+                console.error("Login error:", err);
+                alert(lang === 'zh' ? '登入失敗：' + err.message : 'Login failed: ' + err.message);
+              });
+            }} className="w-full py-3 bg-blue-600 text-white font-bold rounded-xl shadow-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2">
+              <Upload size={18}/> {lang === 'zh' ? '立即綁定 Google 帳號' : 'Link Google Account Now'}
+            </button>
+            <button onClick={() => {
+              setShowCloudPromo(false);
+              localStorage.setItem('willfit_cloud_promo_dismissed', 'true');
+            }} className="w-full py-3 bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-white font-bold rounded-xl hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors">
+              {lang === 'zh' ? '稍後再說' : 'Maybe Later'}
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal isOpen={activeModal === 'deleteConfirm'} onClose={() => setActiveModal(null)} title={strings.deleteConfirmTitle}>
         <div className="space-y-4">
