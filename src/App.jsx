@@ -7,6 +7,7 @@ import {
   HelpCircle, AlertTriangle, X, Plus, ExternalLink, Download, Upload, FileText, Camera, Trash2
 } from 'lucide-react';
 import heic2any from 'heic2any';
+import imageCompression from 'browser-image-compression';
 
 const t = {
   zh: {
@@ -258,30 +259,6 @@ const getEffectiveWeight = (targetDateStr, weightsList) => {
   return sorted[0].weight;
 };
 
-const resizeImage = (dataUrl, maxWidth = 600) => {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.src = dataUrl;
-    img.onload = () => {
-      try {
-        const canvas = document.createElement('canvas');
-        const ratio = maxWidth / img.width;
-        if (ratio >= 1) {
-          resolve(dataUrl); 
-          return;
-        }
-        canvas.width = maxWidth;
-        canvas.height = img.height * ratio;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL('image/jpeg', 0.7));
-      } catch (err) {
-        reject(err);
-      }
-    };
-    img.onerror = () => reject(new Error('Image load failed'));
-  });
-};
 
 export default function App() {
   const [profile, setProfile] = useState(() => {
@@ -882,25 +859,20 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
           try {
             const convertedBlob = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.7 });
             processedFile = Array.isArray(convertedBlob) ? convertedBlob[0] : convertedBlob;
+            processedFile = new File([processedFile], file.name.replace(/\.heic|\.heif/i, '.jpg'), { type: 'image/jpeg' });
           } catch (err) {
             console.error("HEIC conversion error:", err);
             throw new Error("HEIC conversion failed");
           }
         }
         
-        return new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = async (event) => {
-            try {
-              const resized = await resizeImage(event.target.result, 600);
-              resolve(resized);
-            } catch (err) {
-              reject(err);
-            }
-          };
-          reader.onerror = () => reject(new Error("File read error"));
-          reader.readAsDataURL(processedFile);
+        const compressedFile = await imageCompression(processedFile, {
+          maxWidthOrHeight: 600,
+          useWebWorker: true,
+          initialQuality: 0.7
         });
+        
+        return await imageCompression.getDataUrlFromFile(compressedFile);
       }));
 
       setPhotos(prev => [...prev, ...newPhotos]);
