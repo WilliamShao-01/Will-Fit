@@ -3,13 +3,13 @@ import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid
 } from 'recharts';
 import { 
-  Scale, Utensils, Settings, ChevronLeft, ChevronRight, ChevronUp,
-  HelpCircle, AlertTriangle, X, Plus, ExternalLink, Download, Upload, FileText, Camera, Trash2, LogOut
+  Scale, Utensils, Settings, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, CheckCircle, Circle, ArrowRight,
+  HelpCircle, AlertTriangle, X, Plus, ExternalLink, Download, Upload, FileText, Camera, Trash2, LogOut, Copy
 } from 'lucide-react';
 import heic2any from 'heic2any';
 import imageCompression from 'browser-image-compression';
 import { onAuthStateChanged, signInWithPopup } from 'firebase/auth';
-import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { auth, db, googleProvider, CLOUDINARY_CLOUD_NAME, CLOUDINARY_UPLOAD_PRESET } from './config';
 
 const t = {
@@ -266,34 +266,90 @@ const getEffectiveWeight = (targetDateStr, weightsList) => {
 export default function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [pendingCloudMerge, setPendingCloudMerge] = useState(null);
   const [showCloudPromo, setShowCloudPromo] = useState(() => {
     return localStorage.getItem('willfit_cloud_promo_dismissed') !== 'true';
   });
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+    let snapshotUnsubscribe = null;
+
+    const authUnsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       setLoading(false); // Resolve loading immediately after auth state is known
+      
+      if (snapshotUnsubscribe) {
+        snapshotUnsubscribe();
+        snapshotUnsubscribe = null;
+      }
       
       if (currentUser) {
         try {
           const userDocRef = doc(db, 'users', currentUser.uid);
-          const userSnap = await getDoc(userDocRef);
           
-          if (userSnap.exists()) {
-            const data = userSnap.data();
-            const cloudLastUpdated = data.lastUpdated;
-            const localLastUpdated = localStorage.getItem('willfit_lastUpdated');
-            
-            // Only overwrite local state if cloud has newer data, or we have no local data
-            // This prevents old cloud data from overwriting offline local changes
-            if (!localLastUpdated || !cloudLastUpdated || new Date(cloudLastUpdated) > new Date(localLastUpdated)) {
-              if (data.profile) setProfile(data.profile);
-              if (data.dynamicParams) setDynamicParams(data.dynamicParams);
-              if (data.weights) setWeights(data.weights);
-              if (data.meals) setMeals(data.meals);
-            } else if (new Date(localLastUpdated) > new Date(cloudLastUpdated)) {
-              // Local is newer! Push to cloud
+          snapshotUnsubscribe = onSnapshot(userDocRef, async (userSnap) => {
+            if (userSnap.exists()) {
+              const data = userSnap.data();
+              const cloudLastUpdated = data.lastUpdated;
+              const localLastUpdated = localStorage.getItem('willfit_lastUpdated');
+              
+              const localMeals = JSON.parse(localStorage.getItem('willfit_meals') || '[]');
+              const localWeights = JSON.parse(localStorage.getItem('willfit_weights') || '[]');
+              const hasLocalData = localMeals.length > 0 || localWeights.length > 0;
+              const hasCloudData = (data.meals && data.meals.length > 0) || (data.weights && data.weights.length > 0);
+              const shouldPromptMerge = sessionStorage.getItem('willfit_prompt_merge') === 'true';
+
+              // Perform daily auto-backup of the latest cloud state
+              const lastBackupDate = localStorage.getItem('willfit_lastCloudBackup');
+              const todayStr = new Date().toISOString().split('T')[0];
+              if (lastBackupDate !== todayStr && hasCloudData) {
+                createCloudBackup(currentUser.uid, data, 'daily');
+                localStorage.setItem('willfit_lastCloudBackup', todayStr);
+              }
+
+              if (shouldPromptMerge && hasLocalData && hasCloudData) {
+                setPendingCloudMerge(data);
+                sessionStorage.removeItem('willfit_prompt_merge');
+              } else {
+                // Only overwrite local state if cloud has newer data, or we have no local data
+                // This prevents old cloud data from overwriting offline local changes
+                if (!localLastUpdated || !cloudLastUpdated || new Date(cloudLastUpdated) > new Date(localLastUpdated)) {
+                  if (data.profile) setProfile(data.profile);
+                  if (data.dynamicParams) setDynamicParams(data.dynamicParams);
+                  if (data.weights) setWeights(data.weights);
+                  if (data.meals) setMeals(data.meals);
+                  // Sync local timestamp to match cloud to prevent flip-flopping
+                  if (cloudLastUpdated) localStorage.setItem('willfit_lastUpdated', cloudLastUpdated);
+                } else if (new Date(localLastUpdated) > new Date(cloudLastUpdated)) {
+                  // Local is newer! Push to cloud (only on initial load or offline recovery)
+                  if (!isCloudDataFetched.current) {
+                    if (!hasLocalData && hasCloudData) {
+                      // CRITICAL FIX: If local has no meals/weights but is "newer" (e.g. they just finished onboarding after logout)
+                      // Do NOT overwrite the cloud with empty data! Pull from cloud instead.
+                      if (data.profile) setProfile(data.profile);
+                      if (data.dynamicParams) setDynamicParams(data.dynamicParams);
+                      if (data.weights) setWeights(data.weights);
+                      if (data.meals) setMeals(data.meals);
+                      if (cloudLastUpdated) localStorage.setItem('willfit_lastUpdated', cloudLastUpdated);
+                    } else {
+                      const localProfile = JSON.parse(localStorage.getItem('willfit_profile') || 'null');
+                      const localDynamic = JSON.parse(localStorage.getItem('willfit_dynamicParams') || '[]');
+                      
+                      if (localProfile) {
+                        await setDoc(userDocRef, {
+                          profile: localProfile,
+                          dynamicParams: localDynamic,
+                          weights: localWeights,
+                          meals: localMeals,
+                          lastUpdated: localLastUpdated
+                        }, { merge: true });
+                      }
+                    }
+                  }
+                }
+              }
+            } else {
+              // First time login: Upload local data to cloud
               const localProfile = JSON.parse(localStorage.getItem('willfit_profile') || 'null');
               const localDynamic = JSON.parse(localStorage.getItem('willfit_dynamicParams') || '[]');
               const localWeights = JSON.parse(localStorage.getItem('willfit_weights') || '[]');
@@ -305,33 +361,24 @@ export default function App() {
                   dynamicParams: localDynamic,
                   weights: localWeights,
                   meals: localMeals,
-                  lastUpdated: localLastUpdated
-                }, { merge: true });
+                  lastUpdated: localStorage.getItem('willfit_lastUpdated') || new Date().toISOString()
+                });
               }
             }
-          } else {
-            // First time login: Upload local data to cloud
-            const localProfile = JSON.parse(localStorage.getItem('willfit_profile') || 'null');
-            const localDynamic = JSON.parse(localStorage.getItem('willfit_dynamicParams') || '[]');
-            const localWeights = JSON.parse(localStorage.getItem('willfit_weights') || '[]');
-            const localMeals = JSON.parse(localStorage.getItem('willfit_meals') || '[]');
-            
-            if (localProfile) {
-              await setDoc(userDocRef, {
-                profile: localProfile,
-                dynamicParams: localDynamic,
-                weights: localWeights,
-                meals: localMeals,
-                lastUpdated: localStorage.getItem('willfit_lastUpdated') || new Date().toISOString()
-              });
-            }
-          }
+            isCloudDataFetched.current = true;
+          }, (error) => {
+            console.error("Snapshot error:", error);
+          });
         } catch (error) {
-          console.error("Error fetching user data:", error);
+          console.error("Error setting up user snapshot:", error);
         }
       }
     });
-    return () => unsubscribe();
+    
+    return () => {
+      if (snapshotUnsubscribe) snapshotUnsubscribe();
+      authUnsubscribe();
+    };
   }, []);
 
   const [profile, setProfile] = useState(() => {
@@ -374,27 +421,44 @@ export default function App() {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const isInitialMount = useRef(true);
+  const isCloudDataFetched = useRef(false);
+  const isClearingData = useRef(false);
+
+  const createCloudBackup = async (uid, dataToBackup, type = 'daily') => {
+    if (!uid || uid === 'guest_user') return;
+    try {
+      // Use fixed document IDs instead of timestamp to prevent infinite storage growth
+      const backupRef = doc(db, 'users', uid, 'backups', type);
+      await setDoc(backupRef, {
+        ...dataToBackup,
+        backupTime: new Date().toISOString()
+      });
+      console.log('Cloud backup created safely.');
+    } catch (e) {
+      console.error('Failed to create cloud backup:', e);
+    }
+  };
 
   useEffect(() => { 
-    if (!isInitialMount.current) {
+    if (!isInitialMount.current && !isClearingData.current) {
       localStorage.setItem('willfit_profile', JSON.stringify(profile)); 
       localStorage.setItem('willfit_lastUpdated', new Date().toISOString());
     }
   }, [profile]);
   useEffect(() => { 
-    if (!isInitialMount.current) {
+    if (!isInitialMount.current && !isClearingData.current) {
       localStorage.setItem('willfit_dynamicParams', JSON.stringify(dynamicParams)); 
       localStorage.setItem('willfit_lastUpdated', new Date().toISOString());
     }
   }, [dynamicParams]);
   useEffect(() => { 
-    if (!isInitialMount.current) {
+    if (!isInitialMount.current && !isClearingData.current) {
       localStorage.setItem('willfit_weights', JSON.stringify(weights)); 
       localStorage.setItem('willfit_lastUpdated', new Date().toISOString());
     }
   }, [weights]);
   useEffect(() => { 
-    if (!isInitialMount.current) {
+    if (!isInitialMount.current && !isClearingData.current) {
       localStorage.setItem('willfit_meals', JSON.stringify(meals)); 
       localStorage.setItem('willfit_lastUpdated', new Date().toISOString());
     }
@@ -407,7 +471,10 @@ export default function App() {
       return;
     }
     
-    if (!user) return;
+    // Prevent accidental overwrites before cloud data is fetched and evaluated
+    if (!isCloudDataFetched.current) return;
+    
+    if (!user || user.uid === 'guest_user') return;
 
     const syncToCloud = async () => {
       try {
@@ -425,7 +492,7 @@ export default function App() {
     };
     
     syncToCloud();
-  }, [profile, dynamicParams, weights, meals, user]);
+  }, [profile, dynamicParams, weights, meals]);
   useEffect(() => { 
     localStorage.setItem('willfit_lang', lang); 
     document.documentElement.lang = lang === 'en' ? 'en-US' : 'zh-TW';
@@ -581,15 +648,26 @@ export default function App() {
         
         <button 
           onClick={() => {
+            sessionStorage.setItem('willfit_prompt_merge', 'true');
             signInWithPopup(auth, googleProvider).catch(err => {
               console.error("登入錯誤:", err);
               alert("登入失敗：" + err.message);
             });
           }}
-          className={`flex items-center gap-4 px-6 py-4 rounded-2xl shadow border font-bold text-lg active:scale-95 transition-all ${theme === 'dark' ? 'bg-slate-800 border-slate-700 hover:bg-slate-700' : 'bg-white border-slate-200 hover:bg-slate-50'}`}
+          className={`w-full max-w-sm flex items-center justify-center gap-4 px-6 py-4 rounded-2xl shadow border font-bold text-lg active:scale-95 transition-all mb-4 ${theme === 'dark' ? 'bg-slate-800 border-slate-700 hover:bg-slate-700' : 'bg-white border-slate-200 hover:bg-slate-50'}`}
         >
           <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-8 h-8 bg-white rounded-full" />
           {lang === 'zh' ? '使用 Google 帳號登入' : 'Sign in with Google'}
+        </button>
+
+        <button 
+          onClick={() => {
+            setUser({ uid: 'guest_user', isAnonymous: true });
+            setLoading(false);
+          }}
+          className={`w-full max-w-sm flex items-center justify-center gap-4 px-6 py-4 rounded-2xl border font-bold text-lg active:scale-95 transition-all ${theme === 'dark' ? 'border-slate-700 text-slate-400 hover:bg-slate-800' : 'border-slate-300 text-slate-500 hover:bg-slate-100'}`}
+        >
+          {lang === 'zh' ? '先試用看看 (Try it out)' : 'Try it out'}
         </button>
       </div>
     );
@@ -641,37 +719,48 @@ export default function App() {
                     <button onClick={() => { setIsSettingsOpen(false); setCurrentTab('dashboard'); setDashboardScrollTarget('recent'); }} className="w-full text-left px-4 py-3 text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-700 border-b border-slate-100 dark:border-slate-700 transition-colors">{strings.recentRecords}</button>
                     <button onClick={() => { setIsSettingsOpen(false); setCurrentTab('dashboard'); setDashboardScrollTarget('backup'); }} className="w-full text-left px-4 py-3 text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">{strings.backupImport}</button>
                     <div className="h-2 bg-slate-100 dark:bg-slate-900 border-y border-slate-200 dark:border-slate-700"></div>
-                    {user ? (
+                    {user && user.uid !== 'guest_user' ? (
                       <button onClick={async () => {
                         setIsLoggingOut(true);
-                        try {
-                          await setDoc(doc(db, 'users', user.uid), { profile, dynamicParams, weights, meals, lastUpdated: new Date().toISOString() }, { merge: true });
-                        } catch (e) {
-                          console.error("Force save on logout failed:", e);
-                          alert(lang === 'zh' ? '登出前儲存失敗，請檢查連線或資料大小。' : 'Failed to save data before logout.');
+                        isClearingData.current = true; // Prevent useEffect from writing empty states to local storage
+                        
+                        if (user.uid !== 'guest_user') {
+                          try {
+                            await setDoc(doc(db, 'users', user.uid), { profile, dynamicParams, weights, meals, lastUpdated: new Date().toISOString() }, { merge: true });
+                          } catch (e) {
+                            console.error("Force save on logout failed:", e);
+                            alert(lang === 'zh' ? '登出前儲存失敗，請檢查連線或資料大小。' : 'Failed to save data before logout.');
+                          }
+                          
+                          // Clear local storage on logout to avoid mixing user data
+                          localStorage.removeItem('willfit_profile');
+                          localStorage.removeItem('willfit_dynamicParams');
+                          localStorage.removeItem('willfit_weights');
+                          localStorage.removeItem('willfit_meals');
+                          localStorage.removeItem('willfit_lastUpdated');
+                          localStorage.removeItem('willfit_lastCloudBackup');
+                          
+                          isCloudDataFetched.current = false;
+                          
+                          setProfile(null);
+                          setDynamicParams([]);
+                          setWeights([]);
+                          setMeals([]);
+                          
+                          auth.signOut();
                         }
                         
-                        // Clear local storage on logout to avoid mixing user data
-                        localStorage.removeItem('willfit_profile');
-                        localStorage.removeItem('willfit_dynamicParams');
-                        localStorage.removeItem('willfit_weights');
-                        localStorage.removeItem('willfit_meals');
-                        localStorage.removeItem('willfit_lastUpdated');
+                        setUser(null); // Return to login screen
                         
-                        setProfile(null);
-                        setDynamicParams([]);
-                        setWeights([]);
-                        setMeals([]);
-                        
-                        auth.signOut();
-                        setIsLoggingOut(false);
-                        setIsSettingsOpen(false);
+                        // Force a full page reload to ensure all React states and snapshot listeners are completely wiped and reset
+                        window.location.reload();
                       }} disabled={isLoggingOut} className="w-full text-left px-4 py-3 text-sm font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors flex items-center gap-2">
                         <LogOut size={16}/> {isLoggingOut ? (lang === 'zh' ? '儲存並登出中...' : 'Saving & Logging out...') : (lang === 'zh' ? '登出 (Logout)' : 'Logout')}
                       </button>
                     ) : (
                       <button onClick={() => {
                         setIsSettingsOpen(false);
+                        sessionStorage.setItem('willfit_prompt_merge', 'true');
                         signInWithPopup(auth, googleProvider).catch(err => {
                           console.error("Login error:", err);
                           alert(lang === 'zh' ? '登入失敗：' + err.message : 'Login failed: ' + err.message);
@@ -698,7 +787,7 @@ export default function App() {
 
       <main className="max-w-4xl mx-auto px-4 pt-4 pb-28">
         {currentTab === 'weight' && <WeightTab lang={lang} theme={theme} profile={profile} dynamicParams={dynamicParams} weights={weights} setWeights={setWeights} activeDate={activeDate} setActiveDate={setActiveDate} strings={strings} />}
-        {currentTab === 'diet' && <DietTab lang={lang} theme={theme} profile={profile} dynamicParams={dynamicParams} weights={weights} meals={meals} setMeals={setMeals} activeDate={activeDate} setActiveDate={setActiveDate} strings={strings} />}
+        {currentTab === 'diet' && <DietTab lang={lang} theme={theme} profile={profile} dynamicParams={dynamicParams} weights={weights} meals={meals} setMeals={setMeals} activeDate={activeDate} setActiveDate={setActiveDate} strings={strings} user={user} />}
         {currentTab === 'dashboard' && <DashboardTab user={user} lang={lang} setLang={setLang} theme={theme} setTheme={setTheme} profile={profile} setProfile={setProfile} dynamicParams={dynamicParams} setDynamicParams={setDynamicParams} weights={weights} setWeights={setWeights} meals={meals} setMeals={setMeals} streakData={streakData} scrollTarget={dashboardScrollTarget} setScrollTarget={setDashboardScrollTarget} setCurrentTab={setCurrentTab} setActiveDate={setActiveDate} strings={strings} />}
       </main>
 
@@ -743,7 +832,8 @@ export default function App() {
           <p className="text-sm opacity-80 mb-6">{strings.deleteConfirmDesc}</p>
           <div className="flex flex-col gap-3">
             <button onClick={async () => { 
-              if (user) {
+              if (user && user.uid !== 'guest_user') {
+                await createCloudBackup(user.uid, { profile, dynamicParams, weights, meals }, 'pre_delete');
                 try {
                   const { deleteDoc, doc } = await import('firebase/firestore');
                   await deleteDoc(doc(db, 'users', user.uid));
@@ -758,6 +848,58 @@ export default function App() {
             }} className="w-full py-4 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl shadow-lg transition-colors">{strings.confirmDelete}</button>
             <button onClick={() => { setActiveModal(null); setCurrentTab('dashboard'); setDashboardScrollTarget('backup'); }} className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md transition-colors">{strings.backupImport}</button>
             <button onClick={() => { setActiveModal(null); setCurrentTab('dashboard'); }} className="w-full py-3 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 font-bold rounded-xl transition-colors">{strings.backToRecords}</button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal isOpen={!!pendingCloudMerge} onClose={() => {}} title={lang === 'zh' ? '發現雲端備份' : 'Cloud Backup Found'}>
+        <div className="space-y-4">
+          <p className="text-sm opacity-90 leading-relaxed">
+            {lang === 'zh' 
+              ? '系統發現您的 Google 帳號中存有過去的備份資料。是否要將舊資料帶入，並與目前的試用資料合併？（新資料一定會被保留）' 
+              : 'We found previous backup data in your Google account. Do you want to merge it with your current trial data? (Your new data will be kept)'}
+          </p>
+          <div className="flex flex-col gap-3 pt-2">
+            <button onClick={async () => {
+              if (!pendingCloudMerge) return;
+              
+              const mergedMeals = [...meals];
+              const existingMealIds = new Set(meals.map(m => m.id));
+              const cloudMeals = pendingCloudMerge.meals || [];
+              cloudMeals.forEach(cm => {
+                if (!existingMealIds.has(cm.id)) mergedMeals.push(cm);
+              });
+
+              const mergedWeights = [...weights];
+              const existingWeightDates = new Set(weights.map(w => w.date));
+              const cloudWeights = pendingCloudMerge.weights || [];
+              cloudWeights.forEach(cw => {
+                if (!existingWeightDates.has(cw.date)) mergedWeights.push(cw);
+              });
+
+              const finalProfile = profile || pendingCloudMerge.profile;
+              const finalDyn = dynamicParams.length > 0 ? dynamicParams : pendingCloudMerge.dynamicParams;
+
+              setMeals(mergedMeals);
+              setWeights(mergedWeights);
+              setProfile(finalProfile);
+              setDynamicParams(finalDyn);
+              setPendingCloudMerge(null);
+            }} className="w-full py-4 bg-blue-600 text-white font-bold rounded-xl shadow-lg hover:bg-blue-700 transition-colors">
+              {lang === 'zh' ? '合併舊資料與試用資料' : 'Merge Old & Trial Data'}
+            </button>
+            <button onClick={async () => {
+              setPendingCloudMerge(null);
+              try {
+                await setDoc(doc(db, 'users', user.uid), {
+                  profile, dynamicParams, weights, meals, lastUpdated: new Date().toISOString()
+                }, { merge: true });
+              } catch (err) {
+                console.error("Failed to overwrite cloud data:", err);
+              }
+            }} className="w-full py-3 bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-white font-bold rounded-xl hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors">
+              {lang === 'zh' ? '不要帶入舊資料（只保留目前的試用紀錄）' : 'Keep Trial Data Only'}
+            </button>
           </div>
         </div>
       </Modal>
@@ -1055,7 +1197,7 @@ function WeightTab({ lang, theme, profile, dynamicParams, weights, setWeights, a
 // ----------------------------------------------------------------------
 // Diet Tab
 // ----------------------------------------------------------------------
-function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals, activeDate, setActiveDate, strings }) {
+function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals, activeDate, setActiveDate, strings, user }) {
   const [mealTime, setMealTime] = useState('12:00');
   const [mealName, setMealName] = useState('');
   const [mealCal, setMealCal] = useState('');
@@ -1064,6 +1206,39 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
   const [editingMealId, setEditingMealId] = useState(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [duplicatingMeal, setDuplicatingMeal] = useState(null);
+  const [duplicateTargetDate, setDuplicateTargetDate] = useState('');
+  
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [pendingMealCopy, setPendingMealCopy] = useState(null);
+  const [copyCal, setCopyCal] = useState(true);
+  const [copyPhoto, setCopyPhoto] = useState(true);
+  const [showLoginReminder, setShowLoginReminder] = useState(false);
+
+  useEffect(() => {
+    if (user && user.uid === 'guest_user') {
+      const today = getTodayDateStr();
+      const lastReminder = localStorage.getItem('willfit_lastLoginReminder');
+      if (lastReminder !== today) {
+        setShowLoginReminder(true);
+        localStorage.setItem('willfit_lastLoginReminder', today);
+      }
+    }
+  }, [user]);
+
+  const suggestedFoods = useMemo(() => {
+    if (!mealName) return [];
+    const uniqueMeals = [];
+    const seen = new Set();
+    const sortedMeals = [...meals].sort((a,b) => new Date(b.date + 'T' + b.time) - new Date(a.date + 'T' + a.time));
+    sortedMeals.forEach(m => {
+      if (m.name.toLowerCase().includes(mealName.toLowerCase()) && !seen.has(m.name)) {
+        seen.add(m.name);
+        uniqueMeals.push(m);
+      }
+    });
+    return uniqueMeals;
+  }, [meals, mealName]);
 
   const dayMeals = meals.filter(m => m.date === activeDate);
   const totalCal = dayMeals.reduce((acc, curr) => acc + curr.calories, 0);
@@ -1234,9 +1409,29 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
         
         {(isFormOpen || editingMealId) && (
         <form onSubmit={handleMealSubmit} className="space-y-4 mt-4 animate-in fade-in slide-in-from-top-2">
-          <div>
+          <div className="relative">
             <label className="block text-xs font-bold mb-1 text-slate-500">{strings.mealName}</label>
-            <input type="text" value={mealName} onChange={e => setMealName(e.target.value)} required className={`${inputClass} bg-transparent text-slate-900 dark:text-white`} placeholder={lang === 'zh' ? '例如: 排骨便當' : 'e.g. Chicken Salad'} />
+            <input type="text" value={mealName} 
+              onChange={e => { setMealName(e.target.value); setShowSuggestions(true); }} 
+              onFocus={() => setShowSuggestions(true)} 
+              onBlur={() => setTimeout(() => setShowSuggestions(false), 200)} 
+              required className={`${inputClass} bg-transparent text-slate-900 dark:text-white`} 
+              placeholder={lang === 'zh' ? '例如: 排骨便當' : 'e.g. Chicken Salad'} 
+            />
+            {showSuggestions && suggestedFoods.length > 0 && mealName && (
+              <div className="absolute z-10 w-full mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                {suggestedFoods.map(m => (
+                  <div key={m.id} className="p-3 border-b border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer" onClick={() => {
+                    setMealName(m.name);
+                    setPendingMealCopy(m);
+                    setShowSuggestions(false);
+                  }}>
+                    <div className="font-bold">{m.name}</div>
+                    <div className="text-xs text-slate-500">{m.calories} kcal</div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <div className="flex gap-3">
             <div className="w-1/2">
@@ -1301,9 +1496,14 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
                   <div className="font-bold truncate text-lg">{m.name}</div>
                   <div className="text-blue-500 font-semibold">{m.calories} <span className="text-xs text-slate-500">kcal</span></div>
                 </div>
-                <button onClick={() => setDeleteConfirmId(m.id)} className="p-2 text-slate-300 hover:text-red-500 transition-colors shrink-0">
-                  <Trash2 size={20}/>
-                </button>
+                <div className="flex shrink-0">
+                  <button onClick={() => { setDuplicatingMeal(m); setDuplicateTargetDate(getTodayDateStr()); }} className="p-2 text-slate-300 hover:text-blue-500 transition-colors" title={lang === 'zh' ? '複製' : 'Duplicate'}>
+                    <Copy size={20}/>
+                  </button>
+                  <button onClick={() => setDeleteConfirmId(m.id)} className="p-2 text-slate-300 hover:text-red-500 transition-colors" title={lang === 'zh' ? '刪除' : 'Delete'}>
+                    <Trash2 size={20}/>
+                  </button>
+                </div>
               </div>
               {m.photos && m.photos.length > 0 && (
                 <div className="flex gap-2 overflow-x-auto ml-16 pb-1">
@@ -1325,11 +1525,80 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
         </div>
       </Modal>
 
+      <Modal isOpen={!!duplicatingMeal} onClose={() => setDuplicatingMeal(null)} title={lang === 'zh' ? '複製紀錄' : 'Duplicate Meal'}>
+        <div className="mb-4">
+          <label className="block text-xs font-bold mb-2 text-slate-500">{lang === 'zh' ? '選擇目標日期' : 'Target Date'}</label>
+          <input type="date" max={getTodayDateStr()} value={duplicateTargetDate} onChange={e => setDuplicateTargetDate(e.target.value)} required style={{ colorScheme: theme === 'dark' ? 'dark' : 'light' }} className={`${inputClass} bg-transparent text-slate-900 dark:text-white w-full`} />
+        </div>
+        <div className="flex gap-4">
+          <button onClick={() => setDuplicatingMeal(null)} className="w-1/2 py-3 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold">{strings.cancel}</button>
+          <button onClick={() => {
+            if (!duplicateTargetDate) return;
+            setMeals(prev => [...prev, { ...duplicatingMeal, id: Date.now().toString(), date: duplicateTargetDate }]);
+            setDuplicatingMeal(null);
+            setActiveDate(duplicateTargetDate); // Automatically switch to the target date
+          }} className="w-1/2 py-3 bg-blue-600 text-white font-bold rounded-xl shadow-lg">{lang === 'zh' ? '確認複製' : 'Confirm'}</button>
+        </div>
+      </Modal>
+
+      <Modal isOpen={!!pendingMealCopy} onClose={() => setPendingMealCopy(null)} title={lang === 'zh' ? '發現歷史紀錄' : 'Historical Record Found'}>
+        {pendingMealCopy && (
+          <div className="animate-in fade-in zoom-in duration-200">
+            <p className="text-sm mb-4">{lang === 'zh' ? `是否要沿用之前的熱量和照片？` : `Do you want to use the previous calories and photo?`}</p>
+            
+            <div className="flex flex-col gap-3 mb-6">
+              <label className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-700 rounded-xl cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-600 transition-colors">
+                <input type="checkbox" checked={copyCal} onChange={e => setCopyCal(e.target.checked)} className="w-5 h-5 rounded border-slate-300 text-blue-600" />
+                <div className="flex-1">
+                  <div className="font-bold">{lang === 'zh' ? '沿用熱量' : 'Use Calories'}</div>
+                  <div className="text-blue-600 font-bold text-lg">{pendingMealCopy.calories} kcal</div>
+                </div>
+              </label>
+              
+              {pendingMealCopy.photos && pendingMealCopy.photos.length > 0 && (
+              <label className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-700 rounded-xl cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-600 transition-colors">
+                <input type="checkbox" checked={copyPhoto} onChange={e => setCopyPhoto(e.target.checked)} className="w-5 h-5 rounded border-slate-300 text-blue-600" />
+                <div className="flex-1">
+                  <div className="font-bold">{lang === 'zh' ? '沿用照片' : 'Use Photo'}</div>
+                </div>
+                <img src={pendingMealCopy.photos[0]} className="w-12 h-12 object-cover rounded-lg border border-slate-200 dark:border-slate-600" alt="history preview"/>
+              </label>
+              )}
+            </div>
+            
+            <button type="button" onClick={() => {
+              if (copyCal) setMealCal(pendingMealCopy.calories);
+              if (copyPhoto && pendingMealCopy.photos) setPhotos(pendingMealCopy.photos);
+              setPendingMealCopy(null);
+            }} className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg transition-colors">{lang === 'zh' ? '確認' : 'Confirm'}</button>
+          </div>
+        )}
+      </Modal>
+
       {selectedPhoto && (
         <div className="fixed inset-0 bg-black/90 z-[70] flex items-center justify-center p-4" onClick={() => setSelectedPhoto(null)}>
           <img src={selectedPhoto} className="max-w-full max-h-[85vh] rounded-2xl shadow-2xl" alt="View" />
         </div>
       )}
+
+      <Modal isOpen={showLoginReminder} onClose={() => setShowLoginReminder(false)} title={lang === 'zh' ? '溫馨提示' : 'Reminder'}>
+        <div className="space-y-4">
+          <p className="text-sm opacity-90 leading-relaxed">
+            {lang === 'zh' ? '為了避免試用資料遺失，建議您登入 Google 帳號將資料備份到雲端！' : 'To prevent data loss, we recommend logging in to backup your data.'}
+          </p>
+          <div className="flex gap-4 pt-2">
+            <button onClick={() => setShowLoginReminder(false)} className="w-1/2 py-3 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold">{lang === 'zh' ? '稍後再說' : 'Later'}</button>
+            <button onClick={() => {
+              setShowLoginReminder(false);
+              sessionStorage.setItem('willfit_prompt_merge', 'true');
+              signInWithPopup(auth, googleProvider).catch(err => {
+                console.error("登入錯誤:", err);
+                alert("登入失敗：" + err.message);
+              });
+            }} className="w-1/2 py-3 bg-blue-600 text-white font-bold rounded-xl shadow-lg">{lang === 'zh' ? '立即登入' : 'Login Now'}</button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
