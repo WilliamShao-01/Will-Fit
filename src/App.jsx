@@ -1528,7 +1528,7 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
       <Modal isOpen={!!duplicatingMeal} onClose={() => setDuplicatingMeal(null)} title={lang === 'zh' ? '複製紀錄' : 'Duplicate Meal'}>
         <div className="mb-4">
           <label className="block text-xs font-bold mb-2 text-slate-500">{lang === 'zh' ? '選擇目標日期' : 'Target Date'}</label>
-          <input type="date" max={getTodayDateStr()} value={duplicateTargetDate} onChange={e => setDuplicateTargetDate(e.target.value)} required style={{ colorScheme: theme === 'dark' ? 'dark' : 'light' }} className={`${inputClass} bg-transparent text-slate-900 dark:text-white w-full`} />
+          <input type="date" max={getTodayDateStr()} value={duplicateTargetDate} onChange={e => setDuplicateTargetDate(e.target.value)} required style={{ colorScheme: theme === 'dark' ? 'dark' : 'light' }} className={`${inputClass} bg-transparent text-slate-900 dark:text-white w-full max-w-full box-border`} />
         </div>
         <div className="flex gap-4">
           <button onClick={() => setDuplicatingMeal(null)} className="w-1/2 py-3 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold">{strings.cancel}</button>
