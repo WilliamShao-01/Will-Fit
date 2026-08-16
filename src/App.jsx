@@ -314,12 +314,18 @@ export default function App() {
                 // Only overwrite local state if cloud has newer data, or we have no local data
                 // This prevents old cloud data from overwriting offline local changes
                 if (!localLastUpdated || !cloudLastUpdated || new Date(cloudLastUpdated) > new Date(localLastUpdated)) {
+                  isReceivingCloudData.current = true;
                   if (data.profile) setProfile(data.profile);
                   if (data.dynamicParams) setDynamicParams(data.dynamicParams);
                   if (data.weights) setWeights(data.weights);
                   if (data.meals) setMeals(data.meals);
                   // Sync local timestamp to match cloud to prevent flip-flopping
                   if (cloudLastUpdated) localStorage.setItem('willfit_lastUpdated', cloudLastUpdated);
+                  
+                  // Reset safely after render queue
+                  setTimeout(() => {
+                    isReceivingCloudData.current = false;
+                  }, 50);
                 } else if (new Date(localLastUpdated) > new Date(cloudLastUpdated)) {
                   // Local is newer! Push to cloud (only on initial load or offline recovery)
                   if (!isCloudDataFetched.current) {
@@ -423,6 +429,7 @@ export default function App() {
   const isInitialMount = useRef(true);
   const isCloudDataFetched = useRef(false);
   const isClearingData = useRef(false);
+  const isReceivingCloudData = useRef(false);
 
   const createCloudBackup = async (uid, dataToBackup, type = 'daily') => {
     if (!uid || uid === 'guest_user') return;
@@ -442,25 +449,25 @@ export default function App() {
   useEffect(() => { 
     if (!isInitialMount.current && !isClearingData.current) {
       localStorage.setItem('willfit_profile', JSON.stringify(profile)); 
-      localStorage.setItem('willfit_lastUpdated', new Date().toISOString());
+      if (!isReceivingCloudData.current) localStorage.setItem('willfit_lastUpdated', new Date().toISOString());
     }
   }, [profile]);
   useEffect(() => { 
     if (!isInitialMount.current && !isClearingData.current) {
       localStorage.setItem('willfit_dynamicParams', JSON.stringify(dynamicParams)); 
-      localStorage.setItem('willfit_lastUpdated', new Date().toISOString());
+      if (!isReceivingCloudData.current) localStorage.setItem('willfit_lastUpdated', new Date().toISOString());
     }
   }, [dynamicParams]);
   useEffect(() => { 
     if (!isInitialMount.current && !isClearingData.current) {
       localStorage.setItem('willfit_weights', JSON.stringify(weights)); 
-      localStorage.setItem('willfit_lastUpdated', new Date().toISOString());
+      if (!isReceivingCloudData.current) localStorage.setItem('willfit_lastUpdated', new Date().toISOString());
     }
   }, [weights]);
   useEffect(() => { 
     if (!isInitialMount.current && !isClearingData.current) {
       localStorage.setItem('willfit_meals', JSON.stringify(meals)); 
-      localStorage.setItem('willfit_lastUpdated', new Date().toISOString());
+      if (!isReceivingCloudData.current) localStorage.setItem('willfit_lastUpdated', new Date().toISOString());
     }
   }, [meals]);
 
@@ -470,6 +477,9 @@ export default function App() {
       isInitialMount.current = false;
       return;
     }
+    
+    // Prevent auto-syncing if the state change was triggered by incoming cloud data
+    if (isReceivingCloudData.current) return;
     
     // Prevent accidental overwrites before cloud data is fetched and evaluated
     if (!isCloudDataFetched.current) return;
@@ -1528,7 +1538,9 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
       <Modal isOpen={!!duplicatingMeal} onClose={() => setDuplicatingMeal(null)} title={lang === 'zh' ? '複製紀錄' : 'Duplicate Meal'}>
         <div className="mb-4">
           <label className="block text-xs font-bold mb-2 text-slate-500">{lang === 'zh' ? '選擇目標日期' : 'Target Date'}</label>
-          <input type="date" max={getTodayDateStr()} value={duplicateTargetDate} onChange={e => setDuplicateTargetDate(e.target.value)} required style={{ colorScheme: theme === 'dark' ? 'dark' : 'light' }} className={`${inputClass} bg-transparent text-slate-900 dark:text-white w-full max-w-full box-border`} />
+          <div className={`w-full overflow-hidden rounded-2xl ${theme === 'dark' ? 'bg-slate-800 shadow-[inset_0_2px_4px_rgba(0,0,0,0.2)]' : 'bg-slate-100 shadow-[inset_0_2px_4px_rgba(0,0,0,0.05)]'}`}>
+            <input type="date" max={getTodayDateStr()} value={duplicateTargetDate} onChange={e => setDuplicateTargetDate(e.target.value)} required style={{ colorScheme: theme === 'dark' ? 'dark' : 'light' }} className="w-full p-4 bg-transparent text-slate-900 dark:text-white font-bold outline-none block min-w-0" />
+          </div>
         </div>
         <div className="flex gap-4">
           <button onClick={() => setDuplicatingMeal(null)} className="w-1/2 py-3 bg-slate-200 dark:bg-slate-700 rounded-xl font-bold">{strings.cancel}</button>
