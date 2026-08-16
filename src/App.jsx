@@ -273,16 +273,42 @@ export default function App() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
+      setLoading(false); // Resolve loading immediately after auth state is known
+      
       if (currentUser) {
         try {
           const userDocRef = doc(db, 'users', currentUser.uid);
           const userSnap = await getDoc(userDocRef);
+          
           if (userSnap.exists()) {
             const data = userSnap.data();
-            if (data.profile) setProfile(data.profile);
-            if (data.dynamicParams) setDynamicParams(data.dynamicParams);
-            if (data.weights) setWeights(data.weights);
-            if (data.meals) setMeals(data.meals);
+            const cloudLastUpdated = data.lastUpdated;
+            const localLastUpdated = localStorage.getItem('willfit_lastUpdated');
+            
+            // Only overwrite local state if cloud has newer data, or we have no local data
+            // This prevents old cloud data from overwriting offline local changes
+            if (!localLastUpdated || !cloudLastUpdated || new Date(cloudLastUpdated) > new Date(localLastUpdated)) {
+              if (data.profile) setProfile(data.profile);
+              if (data.dynamicParams) setDynamicParams(data.dynamicParams);
+              if (data.weights) setWeights(data.weights);
+              if (data.meals) setMeals(data.meals);
+            } else if (new Date(localLastUpdated) > new Date(cloudLastUpdated)) {
+              // Local is newer! Push to cloud
+              const localProfile = JSON.parse(localStorage.getItem('willfit_profile') || 'null');
+              const localDynamic = JSON.parse(localStorage.getItem('willfit_dynamicParams') || '[]');
+              const localWeights = JSON.parse(localStorage.getItem('willfit_weights') || '[]');
+              const localMeals = JSON.parse(localStorage.getItem('willfit_meals') || '[]');
+              
+              if (localProfile) {
+                await setDoc(userDocRef, {
+                  profile: localProfile,
+                  dynamicParams: localDynamic,
+                  weights: localWeights,
+                  meals: localMeals,
+                  lastUpdated: localLastUpdated
+                }, { merge: true });
+              }
+            }
           } else {
             // First time login: Upload local data to cloud
             const localProfile = JSON.parse(localStorage.getItem('willfit_profile') || 'null');
@@ -296,7 +322,7 @@ export default function App() {
                 dynamicParams: localDynamic,
                 weights: localWeights,
                 meals: localMeals,
-                lastUpdated: new Date().toISOString()
+                lastUpdated: localStorage.getItem('willfit_lastUpdated') || new Date().toISOString()
               });
             }
           }
@@ -304,7 +330,6 @@ export default function App() {
           console.error("Error fetching user data:", error);
         }
       }
-      setLoading(false);
     });
     return () => unsubscribe();
   }, []);
@@ -348,10 +373,59 @@ export default function App() {
   const [isDangerFlashing, setIsDangerFlashing] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
-  useEffect(() => { localStorage.setItem('willfit_profile', JSON.stringify(profile)); }, [profile]);
-  useEffect(() => { localStorage.setItem('willfit_dynamicParams', JSON.stringify(dynamicParams)); }, [dynamicParams]);
-  useEffect(() => { localStorage.setItem('willfit_weights', JSON.stringify(weights)); }, [weights]);
-  useEffect(() => { localStorage.setItem('willfit_meals', JSON.stringify(meals)); }, [meals]);
+  const isInitialMount = useRef(true);
+
+  useEffect(() => { 
+    if (!isInitialMount.current) {
+      localStorage.setItem('willfit_profile', JSON.stringify(profile)); 
+      localStorage.setItem('willfit_lastUpdated', new Date().toISOString());
+    }
+  }, [profile]);
+  useEffect(() => { 
+    if (!isInitialMount.current) {
+      localStorage.setItem('willfit_dynamicParams', JSON.stringify(dynamicParams)); 
+      localStorage.setItem('willfit_lastUpdated', new Date().toISOString());
+    }
+  }, [dynamicParams]);
+  useEffect(() => { 
+    if (!isInitialMount.current) {
+      localStorage.setItem('willfit_weights', JSON.stringify(weights)); 
+      localStorage.setItem('willfit_lastUpdated', new Date().toISOString());
+    }
+  }, [weights]);
+  useEffect(() => { 
+    if (!isInitialMount.current) {
+      localStorage.setItem('willfit_meals', JSON.stringify(meals)); 
+      localStorage.setItem('willfit_lastUpdated', new Date().toISOString());
+    }
+  }, [meals]);
+
+  // Immediate Cloud Sync
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+    
+    if (!user) return;
+
+    const syncToCloud = async () => {
+      try {
+        const lastUpdated = localStorage.getItem('willfit_lastUpdated') || new Date().toISOString();
+        await setDoc(doc(db, 'users', user.uid), {
+          profile,
+          dynamicParams,
+          weights,
+          meals,
+          lastUpdated
+        }, { merge: true });
+      } catch (err) {
+        console.error('Cloud auto-sync failed:', err);
+      }
+    };
+    
+    syncToCloud();
+  }, [profile, dynamicParams, weights, meals, user]);
   useEffect(() => { 
     localStorage.setItem('willfit_lang', lang); 
     document.documentElement.lang = lang === 'en' ? 'en-US' : 'zh-TW';
@@ -576,6 +650,19 @@ export default function App() {
                           console.error("Force save on logout failed:", e);
                           alert(lang === 'zh' ? '登出前儲存失敗，請檢查連線或資料大小。' : 'Failed to save data before logout.');
                         }
+                        
+                        // Clear local storage on logout to avoid mixing user data
+                        localStorage.removeItem('willfit_profile');
+                        localStorage.removeItem('willfit_dynamicParams');
+                        localStorage.removeItem('willfit_weights');
+                        localStorage.removeItem('willfit_meals');
+                        localStorage.removeItem('willfit_lastUpdated');
+                        
+                        setProfile(null);
+                        setDynamicParams([]);
+                        setWeights([]);
+                        setMeals([]);
+                        
                         auth.signOut();
                         setIsLoggingOut(false);
                         setIsSettingsOpen(false);
