@@ -1086,46 +1086,79 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
       const files = Array.from(e.target.files);
       if (files.length === 0) return;
       
-      const newPhotos = await Promise.all(files.map(async (file) => {
+      // Generate blob URLs for optimistic UI
+      const localPhotoUrls = files.map(f => URL.createObjectURL(f));
+      
+      // Immediately show local photos
+      setPhotos(prev => [...prev, ...localPhotoUrls]);
+      
+      // Process and upload in background
+      const uploadedUrls = await Promise.all(files.map(async (file, index) => {
         let processedFile = file;
         
         // Convert HEIC/HEIF to JPEG
         if (file.name.toLowerCase().endsWith('.heic') || file.name.toLowerCase().endsWith('.heif') || file.type === 'image/heic' || file.type === 'image/heif') {
           try {
-            const convertedBlob = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.7 });
+            const convertedBlob = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.85 });
             processedFile = Array.isArray(convertedBlob) ? convertedBlob[0] : convertedBlob;
             processedFile = new File([processedFile], file.name.replace(/\.heic|\.heif/i, '.jpg'), { type: 'image/jpeg' });
           } catch (err) {
             console.error("HEIC conversion error:", err);
-            throw new Error("HEIC conversion failed");
+            // If HEIC conversion fails, fallback to original file
           }
         }
         
-        const compressedFile = await imageCompression(processedFile, {
-          maxWidthOrHeight: 800,
-          useWebWorker: true,
-          initialQuality: 0.8
-        });
-        
-        const formData = new FormData();
-        formData.append('file', compressedFile);
-        formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
-        
-        const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`, {
-          method: 'POST',
-          body: formData
-        });
-        
-        if (!res.ok) throw new Error("Cloudinary upload failed");
-        
-        const data = await res.json();
-        return data.secure_url;
+        try {
+          const compressedFile = await imageCompression(processedFile, {
+            maxWidthOrHeight: 1280, // Increased for better text readability
+            useWebWorker: true,
+            initialQuality: 0.85 // Increased for better quality
+          });
+          
+          const formData = new FormData();
+          formData.append('file', compressedFile);
+          formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+          
+          const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`, {
+            method: 'POST',
+            body: formData
+          });
+          
+          if (!res.ok) throw new Error("Cloudinary upload failed");
+          
+          const data = await res.json();
+          return { local: localPhotoUrls[index], cloud: data.secure_url };
+        } catch (err) {
+          console.error("Upload failed for a file:", err);
+          return { local: localPhotoUrls[index], cloud: null }; // Mark as failed
+        }
       }));
 
-      setPhotos(prev => [...prev, ...newPhotos]);
+      // Update state to replace local blob URLs with cloud URLs
+      setPhotos(prev => prev.map(url => {
+        const match = uploadedUrls.find(u => u.local === url);
+        if (match) return match.cloud || url; // If failed, keep local or it will be broken. We keep local so it shows up until refresh.
+        return url;
+      }));
+      
+      // Update any meals that might have been saved prematurely with the blob URLs
+      setMeals(prevMeals => prevMeals.map(meal => {
+        if (!meal.photos) return meal;
+        let changed = false;
+        const updatedPhotos = meal.photos.map(url => {
+           const match = uploadedUrls.find(u => u.local === url);
+           if (match && match.cloud) {
+             changed = true;
+             return match.cloud;
+           }
+           return url;
+        });
+        return changed ? { ...meal, photos: updatedPhotos } : meal;
+      }));
+      
     } catch (error) {
       console.error("Photo upload error:", error);
-      alert(lang === 'zh' ? '圖片上傳失敗，請確保網路正常並重試。' : 'Upload failed, please check network and try again.');
+      alert(lang === 'zh' ? '圖片上傳處理發生錯誤。' : 'An error occurred during upload processing.');
     } finally {
       e.target.value = '';
     }
@@ -1222,15 +1255,25 @@ function DietTab({ lang, theme, profile, dynamicParams, weights, meals, setMeals
           <div>
             <label className="block text-xs font-bold mb-2 text-slate-500">{strings.photos}</label>
             <div className="flex flex-wrap gap-3">
-              {photos.map((url, idx) => (
-                <div key={idx} className="relative w-20 h-20 group">
-                  <img src={url} alt={`preview-${idx}`} className="w-full h-full object-cover rounded-xl border border-slate-200 dark:border-slate-600" />
-                  <button type="button" onClick={() => setPhotos(prev => prev.filter((_, i) => i !== idx))} 
-                    className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-md hover:scale-110 transition-transform">
-                    <X size={12} />
-                  </button>
-                </div>
-              ))}
+              {photos.map((url, idx) => {
+                const isUploading = url.startsWith('blob:');
+                return (
+                  <div key={idx} className="relative w-20 h-20 group">
+                    <img src={url} alt={`preview-${idx}`} className={`w-full h-full object-cover rounded-xl border border-slate-200 dark:border-slate-600 transition-opacity ${isUploading ? 'opacity-50 blur-[2px]' : ''}`} />
+                    {isUploading && (
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                      </div>
+                    )}
+                    {!isUploading && (
+                      <button type="button" onClick={() => setPhotos(prev => prev.filter((_, i) => i !== idx))} 
+                        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-md hover:scale-110 transition-transform">
+                        <X size={12} />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
               <label className="w-20 h-20 border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
                 <Camera size={24} className="text-slate-400 mb-1" />
                 <span className="text-[10px] text-slate-400 font-medium">{strings.uploadPhoto}</span>
